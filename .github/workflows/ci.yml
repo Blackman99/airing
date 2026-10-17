@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ["18", "20", "24"]
+        exclude:
+          - os: macos-latest
+            node: "18"
+          - os: windows-latest
+            node: "18"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      - name: dist and site/app.js are up to date
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
+        shell: bash
+        run: git diff --exit-code -- dist site/app.js || (echo "::error::run npm run build and commit dist/ and site/app.js" && exit 1)
+
+  dogfood:
+    # The real CLI on real folders: our own Pages artifact, and the landing's sample project.
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - run: npm ci
+      - name: this repo deploys site/ to Pages — only the deliberately leaky demo may show up
+        shell: bash
+        run: |
+          set +e; node dist/cli.js . --no-color > "$RUNNER_TEMP/self.txt"; code=$?; set -e
+          cat "$RUNNER_TEMP/self.txt"
+          test "$code" = "1"
+          grep -q "GitHub Pages (Actions) · site/" "$RUNNER_TEMP/self.txt"
+          # every LEAK/RISK line must be inside site/leaky-demo/
+          if grep -E "^   (LEAK|RISK) " "$RUNNER_TEMP/self.txt" | grep -v "leaky-demo/"; then echo "::error::unexpected finding outside leaky-demo/"; exit 1; fi
+      - name: the landing's sample project, deployed from its root to Cloudflare Pages
+        shell: bash
+        run: |
+          node scripts/sample.mjs "$RUNNER_TEMP/swarm"
+          cd "$RUNNER_TEMP/swarm"
+          set +e; node "$GITHUB_WORKSPACE/dist/cli.js" . --no-color > out.txt; code=$?; set -e
+          cat out.txt
+          test "$code" = "1"
+          grep -q "Cloudflare Pages · ./  (package.json scripts.deploy)" out.txt
+          grep -q "LEAK  .env " out.txt
+          grep -q "deploy the build output instead: wrangler pages deploy dist" out.txt
+          grep -q 'saved by the host: .git/' out.txt
+          if grep -q "AIza" out.txt && grep -E "AIza[0-9A-Za-z_-]{20}" out.txt; then echo "::error::a key value was printed"; exit 1; fi
+          node "$GITHUB_WORKSPACE/dist/cli.js" . --markdown >> "$GITHUB_STEP_SUMMARY" || true
+      - name: guard refuses, then allows the fixed command
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/swarm"
+          mkdir -p bin && printf '#!/bin/sh\necho DEPLOYED "$@"\n' > bin/wrangler && chmod +x bin/wrangler
+          export PATH="$PWD/bin:$PATH"
+          set +e; node "$GITHUB_WORKSPACE/dist/cli.js" guard -- wrangler pages deploy . > g1.txt 2>&1; c1=$?; set -e
+          cat g1.txt; test "$c1" = "1"; ! grep -q DEPLOYED g1.txt
+          rm dist/assets/*.map
+          sed -i 's/const g="[^"]*"/const g=window.KEY/' dist/assets/index-8f3a.js
+          node "$GITHUB_WORKSPACE/dist/cli.js" guard -- wrangler pages deploy dist | tee g2.txt
+          grep -q "DEPLOYED pages deploy dist" g2.txt
+      - name: MCP stdio smoke
+        shell: bash
+        run: |
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"scan_deploy","arguments":{"path":"'"$RUNNER_TEMP"'/swarm","host":"cf-workers"}}}' \
+            | node dist/cli.js mcp > mcp.out
+          node -e "const l=require('fs').readFileSync('mcp.out','utf8').trim().split('\n').map(JSON.parse); const t=l.find(x=>x.id===2).result.tools.map(x=>x.name).join(); if(t!=='scan_deploy,probe_url,host_rules') throw new Error(t); const r=l.find(x=>x.id===3).result; if(r.isError||!/\.git\//.test(r.content[0].text)) throw new Error(JSON.stringify(r)); console.log('ok', t)"
+
+  action:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v7
+      - name: a clean build output passes
+        run: mkdir -p out && echo '<h1>hi</h1>' > out/index.html && echo 'console.log(1)' > out/app.js
+      - id: ok
+        uses: ./
+        with:
+          path: out
+          host: cf-pages
+      - run: test "${{ steps.ok.outputs.leaks }}" = "0"
+      - name: an .env in the deploy dir
+        run: printf 'OPENAI_API_KEY=%s\n' "sk-proj-$(head -c 30 /dev/urandom | base64 | tr -dc A-Za-z0-9 | head -c 40)" > out/.env
+      - id: warn
+        uses: ./
+        with:
+          path: out
+          host: cf-pages
+          fail-on: never
+      - run: test "${{ steps.warn.outputs.leaks }}" = "1"
+      - id: netlify
+        uses: ./
+        with:
+          path: out
+          host: netlify
+      - name: netlify skips dotfiles, so the same folder is clean there
+        run: test "${{ steps.netlify.outputs.leaks }}" = "0"
+      - id: gate
+        uses: ./
+        continue-on-error: true
+        with:
+          path: out
+          host: firebase
+      - name: the gate failed the step on firebase (dot true)
+        run: test "${{ steps.gate.outcome }}" = "failure"

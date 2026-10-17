@@ -1,0 +1,1 @@
+{"version": 3, "file": "app.js", "sources": ["../../src/leaky.ts"], "sourcesContent": ["// the original source of the leaky demo, shipped by mistake\nconst el = document.getElementById(\"out\")!;\nel.textContent = \"(this script ships its source map, with the original source inside)\";\n"], "names": [], "mappings": "AAAA"}

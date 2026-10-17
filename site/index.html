@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>airing — see what your deploy hangs out in public</title>
+<meta name="description" content="airing reads your deploy folder with each host's real ignore rules and shows which .env, .git, keys and source maps would end up at a public URL — before your agent deploys, and after it's live.">
+<link rel="canonical" href="https://blackman99.github.io/airing/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="airing">
+<meta property="og:title" content="airing — see what your deploy hangs out in public">
+<meta property="og:description" content="Cloudflare Pages uploads your .env. Firebase uploads dotfiles. airing shows, before your agent deploys, which secrets each host would put at a public URL.">
+<meta property="og:url" content="https://blackman99.github.io/airing/">
+<meta property="og:image" content="https://blackman99.github.io/airing/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A Naples alley laundry line: a scarlet .env hangs among the washing, tagged PUBLIC · GOOGLE_API_KEY.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="airing — see what your deploy hangs out in public">
+<meta name="twitter:description" content="Before your agent deploys: which .env, .git, keys and source maps would each host make public? Real host rules, one command.">
+<meta name="twitter:image" content="https://blackman99.github.io/airing/og.png">
+<meta name="twitter:image:alt" content="A Naples alley laundry line: a scarlet .env hangs among the washing, tagged PUBLIC · GOOGLE_API_KEY.">
+<meta name="theme-color" content="#9ccbe6">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="logo-512.png" type="image/png" sizes="512x512">
+<link rel="apple-touch-icon" href="logo-512.png">
+<link rel="preload" href="fonts/bodoni-italic.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/karla.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">skip to the text</a>
+<header class="hero" aria-labelledby="h1">
+  <h1 id="h1" class="sr">airing — see what your deploy hangs out in public</h1>
+  <div class="stage">
+    <svg id="alley" role="img" aria-label="A laundry line strung across a narrow alley. Each garment is a file your host would make public; the scarlet ones are secrets."></svg>
+    <section class="plaque" aria-label="what airing does">
+      <p class="vico">vicolo dei deploy</p>
+      <p class="lede">What will your host hang out in public?</p>
+      <p class="sub">airing reads your deploy folder with each host's <em>real</em> ignore rules and shows which <code>.env</code>, <code>.git</code>, keys and source maps would sit at a public URL — before your agent deploys, and after it's live.</p>
+      <div class="cmd"><code>npx github:Blackman99/airing</code><button type="button" data-copy="npx github:Blackman99/airing">copy</button></div>
+      <p class="cmd-note">Node 18.17+ · straight from GitHub, nothing to install · not on npm yet</p>
+    </section>
+    <section class="hosts" aria-label="choose a host">
+      <p class="hosts-h">who's deploying it?</p>
+      <div class="tags"></div>
+    </section>
+    <section class="verdict" aria-live="off">
+      <p class="big">…</p>
+      <p class="small"></p>
+      <p class="keep"></p>
+      <p class="saved"></p>
+      <a class="src" href="#">read the host's own source ↗</a>
+    </section>
+    <section class="drop" aria-label="try your own folder">
+      <p class="now">On the line: <span id="tree-name">the sample project</span></p>
+      <p class="how"><strong>Drop a project folder into the basket</strong> — or <label class="pick">choose one<input id="pick" type="file" webkitdirectory multiple></label>. It's read in this tab; nothing is uploaded.</p>
+      <p class="mine-only"><span class="name"></span> · <button type="button" class="reset">back to the sample</button></p>
+    </section>
+  </div>
+  <p id="live" class="sr" aria-live="polite"></p>
+</header>
+
+<main id="main" class="street">
+  <section class="floor" id="printed">
+    <div class="win l" aria-hidden="true"><i></i><i></i></div><div class="win r" aria-hidden="true"><i></i><i></i></div>
+    <p class="no">1</p>
+    <h2>The same line, as the CLI prints it</h2>
+    <p>The garments above are this exact report: airing's scanner, bundled into this page, run on the sample project for the host you picked. No fixtures — click another host tag and this text changes too.</p>
+    <pre id="cli-out" class="term" tabindex="0" aria-label="airing CLI output">…</pre>
+    <p class="term-cap">exactly what <code>airing</code> prints in your terminal<span class="swipe"> · swipe the report →</span></p>
+  </section>
+
+  <section class="floor" id="hosts">
+    <div class="win l" aria-hidden="true"><i></i><i></i></div><div class="win r" aria-hidden="true"><i></i><i></i></div>
+    <p class="no">2</p>
+    <h2>Which host hangs out what</h2>
+    <p>Every host CLI has its own idea of what to skip, and none of them read your <code>.gitignore</code>. These cells are computed live by airing's <code>hostFilter()</code>, a port of each CLI's real walker — every host name links to the upstream source it follows.</p>
+    <div class="care-wrap" tabindex="0" aria-label="host table, scrolls sideways"><table id="care" class="care"></table></div>
+    <p class="care-cap">default behaviour when the folder you deploy contains these paths<span class="swipe"> · swipe the table →</span></p>
+    <p class="legend"><span class="k public">on the line</span> served at a public URL · <span class="k uploaded">uploaded</span> sent to the host's build machine, served only if your build copies it · <span class="k home">basket</span> skipped by the host</p>
+  </section>
+
+  <section class="floor" id="before">
+    <div class="win l" aria-hidden="true"><i></i><i></i></div><div class="win r" aria-hidden="true"><i></i><i></i></div>
+    <p class="no">3</p>
+    <h2>Before: stop the agent at the door</h2>
+    <p>Coding agents run <code>wrangler pages deploy .</code> because it works. Give Claude Code a <code>PreToolUse</code> hook and airing reads every deploy command first: if the upload set would leak, the command is denied with the list and the fix. Clean deploys go through silently.</p>
+    <pre class="code" tabindex="0">// once, so the hook starts in ms: npm i -g github:Blackman99/airing
+// .claude/settings.json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Bash",
+      "hooks": [{
+        "type": "command",
+        "command": "airing hook"
+      }]
+    }]
+  }
+}</pre>
+    <p>Any other agent, or a human: put <code>airing guard --</code> in front of the deploy. It scans exactly what that command would upload and runs it only if nothing leaks.</p>
+    <pre class="code" tabindex="0">npx github:Blackman99/airing guard -- wrangler pages deploy dist</pre>
+  </section>
+
+  <section class="floor" id="after">
+    <div class="win l" aria-hidden="true"><i></i><i></i></div><div class="win r" aria-hidden="true"><i></i><i></i></div>
+    <p class="no">4</p>
+    <h2>After: look up from the street</h2>
+    <p><code>airing probe</code> is the passer-by: it GETs about forty well-known paths on your live site (<code>/.env</code>, <code>/.git/config</code>, <code>/backup.sql</code>, source maps of the page's own scripts…), fingerprints the soft-404 first so an SPA's catch-all never counts as a hit, and reports names and fingerprints — never values. We keep a deliberately leaky page up so you can watch it work:</p>
+    <pre class="code" tabindex="0">npx github:Blackman99/airing probe \
+  https://blackman99.github.io/airing/leaky-demo/</pre>
+    <p class="aside">Only probe sites you own. If it finds a key, rotate the key first — deleting the file doesn't un-download it.</p>
+  </section>
+
+  <section class="floor" id="ci">
+    <div class="win l" aria-hidden="true"><i></i><i></i></div><div class="win r" aria-hidden="true"><i></i><i></i></div>
+    <p class="no">5</p>
+    <h2>In CI, and for agents over MCP</h2>
+    <pre class="code" tabindex="0"># after your build step
+- uses: Blackman99/airing@v0
+  with:
+    path: .
+    # optional, after deploy:
+    probe-url: https://my-site.pages.dev</pre>
+    <pre class="code" tabindex="0">{
+  "mcpServers": {
+    "airing": {
+      "command": "npx",
+      "args": ["-y", "github:Blackman99/airing", "mcp"]
+    }
+  }
+}</pre>
+    <p>Read-only tools: <code>scan_deploy</code>, <code>probe_url</code>, <code>host_rules</code>.</p>
+  </section>
+
+  <footer class="floor foot" id="foot">
+    <p class="sign">airing</p>
+    <p><a href="docs/">docs</a> · <a href="https://github.com/Blackman99/airing">GitHub</a> · <a href="https://github.com/Blackman99/airing/blob/main/GOAL.md">goal</a> · <a href="https://github.com/Blackman99/airing/blob/main/ROADMAP.md">roadmap</a> · MIT</p>
+    <p class="aside">airing reads files and prints names, sizes and 8-character SHA-256 fingerprints. It never uploads, never prints a value.</p>
+  </footer>
+</main>
+</body>
+</html>

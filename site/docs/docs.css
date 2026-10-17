@@ -1,0 +1,14 @@
+.docs-head { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px max(16px, 8vw); background: var(--sky); border-bottom: 2.4px solid var(--ink); }
+.docs-head .home { display: flex; align-items: center; gap: 10px; text-decoration: none; font: italic 800 30px/1 var(--display); }
+.docs-head nav { display: flex; flex-wrap: wrap; gap: 6px 16px; font-weight: 700; font-size: 15px; }
+.docs h1 { font: italic 600 clamp(34px, 5vw, 52px)/1.04 var(--display); margin: 0 0 16px; }
+.docs h3 { font: italic 600 23px/1.2 var(--display); margin: 30px 0 10px; }
+.docs h3 code { font-size: .78em; font-style: normal; }
+.docs .floor { scroll-margin-top: 70px; }
+table.plain { width: 100%; border-collapse: collapse; background: var(--linen); border: 2px solid var(--ink); margin: 0 0 22px; font-size: 14.5px; }
+table.plain th, table.plain td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid rgba(23, 36, 47, .2); }
+table.plain thead th { border-bottom: 2px solid var(--ink); }
+table.plain td code, table.plain th code { background: none; padding: 0; }
+.hosts-ref th { white-space: nowrap; }
+.docs .floor > table.plain { max-width: 980px; }
+@media (max-width: 720px) { table.plain { display: block; overflow-x: auto; } .docs-head .home span { display: none; } }

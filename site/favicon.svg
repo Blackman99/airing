@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>airing</title>
+  <g transform="translate(0 36)">
+  <!-- the line: posts, sagging rope -->
+  <path d="M40 64 V196" stroke="#17242f" stroke-width="18" stroke-linecap="round"/>
+  <path d="M472 64 V196" stroke="#17242f" stroke-width="18" stroke-linecap="round"/>
+  <path d="M40 92 Q256 196 472 92" fill="none" stroke="#17242f" stroke-width="12" stroke-linecap="round"/>
+  <path d="M40 92 Q256 196 472 92" fill="none" stroke="#b88a55" stroke-width="5" stroke-dasharray="7 9" stroke-linecap="round"/>
+  <!-- scarlet briefs with a keyhole cut clean through -->
+  <path fill-rule="evenodd" fill="#df2a40" stroke="#17242f" stroke-width="12" stroke-linejoin="round"
+    d="M104 138 Q256 162 408 138 L396 248 Q330 270 304 372 Q256 392 208 372 Q182 270 116 248 Z
+       M256 198 a30 30 0 0 1 17 54.6 L282 312 H230 L239 252.6 A30 30 0 0 1 256 198 Z"/>
+  <!-- two wooden pegs -->
+  <g stroke="#17242f" stroke-width="9" stroke-linejoin="round">
+    <rect x="148" y="92" width="34" height="86" rx="9" fill="#b88a55" transform="rotate(-8 165 135)"/>
+    <rect x="330" y="92" width="34" height="86" rx="9" fill="#b88a55" transform="rotate(8 347 135)"/>
+  </g>
+  <g stroke="#17242f" stroke-width="6">
+    <path d="M150 136 H182" transform="rotate(-8 165 135)"/>
+    <path d="M332 136 H364" transform="rotate(8 347 135)"/>
+  </g>
+  </g>
+</svg>

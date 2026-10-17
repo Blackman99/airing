@@ -1,0 +1,5 @@
+node_modules/
+*.tgz
+.DS_Store
+/tmp/
+# dist/ and site/app.js are committed on purpose: the Action and `npx github:` run them as-is

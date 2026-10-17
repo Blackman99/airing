@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - name: version matches tag
+        run: |
+          v=$(node -p "require('./package.json').version")
+          test "v$v" = "${GITHUB_REF_NAME}" || (echo "::error::package.json $v != tag ${GITHUB_REF_NAME}" && exit 1)
+          grep -q "\"$v\"" src/version.ts
+      - run: npm pack
+      - name: smoke-test the tarball
+        run: |
+          mkdir /tmp/t && cd /tmp/t && npm init -y >/dev/null && npm install "$GITHUB_WORKSPACE"/airing-*.tgz
+          npx airing --version
+          npx airing hosts | grep -q "Cloudflare Pages"
+          node "$GITHUB_WORKSPACE/scripts/sample.mjs" /tmp/t/swarm
+          set +e; npx airing /tmp/t/swarm ; code=$?; set -e
+          test "$code" = "1"
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | npx airing mcp | grep -q scan_deploy
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: airing-*.tgz
+          generate_release_notes: true

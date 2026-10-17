@@ -1,0 +1,71 @@
+{
+  "name": "airing",
+  "version": "0.1.0",
+  "description": "What is your deploy airing in public? Before your agent runs wrangler / vercel / netlify / firebase deploy, see which .env, .git, keys and source maps that host would publish \u2014 and probe the live site for what already is.",
+  "type": "module",
+  "bin": {
+    "airing": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist/cli.js",
+    "dist/index.js",
+    "action.yml",
+    "README.md",
+    "LICENSE",
+    "GOAL.md"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test test/scan.test.ts test/probe.test.ts test/upstream.test.ts test/cli.test.ts"
+  },
+  "keywords": [
+    "ai-agents",
+    "claude-code",
+    "codex",
+    "cursor",
+    "deploy",
+    "cloudflare-pages",
+    "wrangler",
+    "vercel",
+    "netlify",
+    "firebase-hosting",
+    "github-pages",
+    "dotenv",
+    "env",
+    "secrets",
+    "leak",
+    "source-maps",
+    "mcp",
+    "mcp-server",
+    "github-action",
+    "cli"
+  ],
+  "author": "Blackman99",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Blackman99/airing.git"
+  },
+  "homepage": "https://blackman99.github.io/airing/",
+  "bugs": "https://github.com/Blackman99/airing/issues",
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@vercel/client": "^18.8.7",
+    "esbuild": "^0.25.12",
+    "glob": "^10.5.0",
+    "ignore": "^7.0.12",
+    "minimatch": "^10.2.6",
+    "smol-toml": "^1.9.1",
+    "tinyglobby": "^0.2.17",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9"
+  }
+}
