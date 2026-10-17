@@ -197,8 +197,9 @@ export function formatProbe(r: ProbeReport, st: Style = plain, o: FormatOpts = {
   out.push(`  ${r.checked} GET request${r.checked === 1 ? "" : "s"} · ${st.dim(r.notFound.note)}`);
   const shown = r.findings.filter((f) => o.all || f.severity !== "INFO");
   if (shown.length) out.push("");
+  const ppw = Math.min(52, Math.max(30, ...shown.map((f) => f.path.length + 1)));
   for (const f of shown) {
-    out.push(`  ${sev(st, f.severity)} ${st.path(pad(f.path, 30))} ${st.dim(pad(fmtBytes(f.size), 8))} ${f.title} — ${f.detail}`);
+    out.push(`  ${sev(st, f.severity)} ${st.path(pad(f.path, ppw))} ${st.dim(pad(fmtBytes(f.size), 8))} ${f.title} — ${f.detail}`);
     if (f.secrets.length) out.push(...secretLines(st, f.secrets, "         "));
     if (f.severity !== "INFO") out.push(`         ${st.dim("fix:")} ${f.fix}`);
   }

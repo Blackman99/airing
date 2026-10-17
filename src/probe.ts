@@ -199,7 +199,7 @@ export async function probe(target: string, opts: ProbeOptions = {}): Promise<Pr
         const g = await get(new URL(c.path, base).href);
         if (!g || soft(g)) continue;
         const v = c.validate(g);
-        if (v) push("/" + c.path, g, c.rule, v, fixText(c.rule));
+        if (v) push(new URL(c.path, base).pathname, g, c.rule, v, fixText(c.rule)); // the real path: a site under /docs/ leaks /docs/.env, not /.env
       }
     }),
   );

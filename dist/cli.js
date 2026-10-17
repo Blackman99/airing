@@ -3111,8 +3111,9 @@ function formatProbe(r, st = plain, o = {}) {
   out.push(`  ${r.checked} GET request${r.checked === 1 ? "" : "s"} \xB7 ${st.dim(r.notFound.note)}`);
   const shown = r.findings.filter((f2) => o.all || f2.severity !== "INFO");
   if (shown.length) out.push("");
+  const ppw = Math.min(52, Math.max(30, ...shown.map((f2) => f2.path.length + 1)));
   for (const f2 of shown) {
-    out.push(`  ${sev(st, f2.severity)} ${st.path(pad(f2.path, 30))} ${st.dim(pad(fmtBytes(f2.size), 8))} ${f2.title} \u2014 ${f2.detail}`);
+    out.push(`  ${sev(st, f2.severity)} ${st.path(pad(f2.path, ppw))} ${st.dim(pad(fmtBytes(f2.size), 8))} ${f2.title} \u2014 ${f2.detail}`);
     if (f2.secrets.length) out.push(...secretLines(st, f2.secrets, "         "));
     if (f2.severity !== "INFO") out.push(`         ${st.dim("fix:")} ${f2.fix}`);
   }
@@ -4857,7 +4858,7 @@ async function probe(target, opts = {}) {
         const g = await get(new URL(c.path, base2).href);
         if (!g || soft(g)) continue;
         const v = c.validate(g);
-        if (v) push("/" + c.path, g, c.rule, v, fixText(c.rule));
+        if (v) push(new URL(c.path, base2).pathname, g, c.rule, v, fixText(c.rule));
       }
     })
   );
