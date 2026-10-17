@@ -48,7 +48,7 @@ Exit code `1` means something would leak, `0` means clean, `2` means a usage or 
 **Claude Code** — a `PreToolUse` hook that denies a leaking `wrangler` / `vercel` / `netlify` / `firebase` / `gh-pages` command and hands the agent the fix:
 
 ```bash
-npm i -g github:Blackman99/airing     # once, so the hook starts in ms
+npm i -g https://github.com/Blackman99/airing/releases/latest/download/airing.tgz     # once, so the hook starts in ms
 ```
 
 ```jsonc
@@ -105,12 +105,12 @@ Read-only tools: `scan_deploy`, `probe_url`, `host_rules`.
 
 ## Install
 
-airing is **not on the npm registry yet** (so `npx airing` won't find it). Run it from GitHub — it has no runtime dependencies and `dist/` is committed, so nothing builds on install:
+airing is **not on the npm registry yet** (so `npx airing` won't find it). Run it from GitHub, or install the release tarball — it has no runtime dependencies and `dist/` is committed, so nothing builds on install. (Use the tarball for a global install: npm 11's `npm i -g github:…` links a temp clone and leaves a dead `airing` command.)
 
 ```bash
-npx github:Blackman99/airing .                 # one-off
-npm i -g github:Blackman99/airing              # or install the `airing` command
-npm i -g https://github.com/Blackman99/airing/releases/download/v0.1.0/airing-0.1.0.tgz   # pinned release
+npx github:Blackman99/airing .        # one-off, nothing installed
+npm i -g https://github.com/Blackman99/airing/releases/latest/download/airing.tgz   # the `airing` command (latest release)
+npm i -g https://github.com/Blackman99/airing/releases/download/v0.1.0/airing-0.1.0.tgz   # pinned
 ```
 
 Node 18.17+. Full reference, configuration and FAQ: [docs](https://blackman99.github.io/airing/docs/).

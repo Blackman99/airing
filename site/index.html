@@ -88,7 +88,8 @@
     <p class="no">3</p>
     <h2>Before: stop the agent at the door</h2>
     <p>Coding agents run <code>wrangler pages deploy .</code> because it works. Give Claude Code a <code>PreToolUse</code> hook and airing reads every deploy command first: if the upload set would leak, the command is denied with the list and the fix. Clean deploys go through silently.</p>
-    <pre class="code" tabindex="0">// once, so the hook starts in ms: npm i -g github:Blackman99/airing
+    <pre class="code" tabindex="0">// once, so the hook starts in ms:
+// npm i -g https://github.com/Blackman99/airing/releases/latest/download/airing.tgz
 // .claude/settings.json
 {
   "hooks": {

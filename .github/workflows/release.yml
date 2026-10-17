@@ -33,7 +33,12 @@ jobs:
           set +e; npx airing /tmp/t/swarm ; code=$?; set -e
           test "$code" = "1"
           printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | npx airing mcp | grep -q scan_deploy
+      - name: stable asset name, so releases/latest/download/airing.tgz always works
+        run: cp airing-*.tgz airing.tgz
       - uses: softprops/action-gh-release@v3
         with:
-          files: airing-*.tgz
+          files: |
+            airing-*.tgz
+            airing.tgz
+          body_path: .github/release-notes.md
           generate_release_notes: true

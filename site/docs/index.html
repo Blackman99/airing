@@ -39,11 +39,11 @@
   <p>airing is a Node CLI (Node 18.17 or newer). The hosts you deploy to are all npm CLIs, so you already have what it needs. Run it straight from GitHub:</p>
   <pre class="code" tabindex="0">npx github:Blackman99/airing .</pre>
   <p>or install it once (do this if you use the Claude Code hook — it then starts in milliseconds instead of re-fetching on every command):</p>
-  <pre class="code" tabindex="0">npm i -g github:Blackman99/airing
+  <pre class="code" tabindex="0">npm i -g https://github.com/Blackman99/airing/releases/latest/download/airing.tgz
 airing --version</pre>
-  <p>Pinned to a release, from the tarball attached to it:</p>
+  <p>Pinned to a release:</p>
   <pre class="code" tabindex="0">npm i -g https://github.com/Blackman99/airing/releases/download/v0.1.0/airing-0.1.0.tgz</pre>
-  <p class="aside">airing is not on the npm registry yet, so <code>npx airing</code> will not find it — use the <code>github:</code> forms above. The package has no runtime dependencies; <code>dist/</code> is committed, so nothing is built on install.</p>
+  <p class="aside">airing is not on the npm registry yet, so <code>npx airing</code> will not find it — use <code>npx github:Blackman99/airing</code> or the release tarball. Don't use <code>npm i -g github:…</code>: npm 11 links a temporary clone and leaves a dead <code>airing</code> command. The package has no runtime dependencies; <code>dist/</code> is committed, so nothing is built on install.</p>
   <p class="aside">It reads files and makes no network requests, except for <code>airing probe</code>, which makes GET requests to the URL you give it.</p>
 </section>
 
