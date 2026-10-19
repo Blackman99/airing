@@ -9,7 +9,7 @@
 
 ## v0.2
 - Old deployments stay live: list Cloudflare Pages `<hash>.<project>.pages.dev` and Vercel preview URLs with the host APIs and probe them too
-- Surge: done on main (`--host surge`, `.surgeignore`, cross-checked against surge-ignore and the surge-stream walker)
+- Surge: shipped in v0.2.0 (`--host surge`, `.surgeignore`, cross-checked against surge-ignore and the surge-stream walker)
 - Render static sites, Azure Static Web Apps, AWS Amplify / `aws s3 sync`
 - `--watch` for agents that deploy in a loop
 

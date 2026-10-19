@@ -1,13 +1,16 @@
-**airing** tells you which `.env`, `.git`, keys and source maps your host would publish — before your coding agent deploys, and after the site is live. It reads the folder the way each host's CLI really does (`wrangler`, `vercel`, `netlify`, `firebase`, `gh-pages`, `upload-pages-artifact`), ported from their source and cross-checked in CI. It prints names, sizes and 8-character SHA-256 fingerprints — never a value.
+**airing** tells you which `.env`, `.git`, keys and source maps your host would publish — before your coding agent deploys, and after the site is live. It reads the folder the way each host's CLI really does (`wrangler`, `vercel`, `netlify`, `firebase`, `gh-pages`, `upload-pages-artifact`, `surge`), ported from their source and cross-checked in CI. It prints names, sizes and 8-character SHA-256 fingerprints — never a value.
 
-Why now: one agent-deployed `.env` on Cloudflare Pages turned into a [$90k Gemini bill](https://x.com/JustLingonberry/status/2110824346168238204). `wrangler pages deploy .` uploads `.env`, Workers assets ship `.git/`, Vercel skips `.env.local` but not `.env`, and none of them read `.gitignore`.
+### New in v0.2.0: Surge, the eighth host
+- `--host surge` and the all-host matrix: what `surge <dir> <domain>` would publish. Rules are ported from the Surge CLI's own source (surge 0.45 / surge-stream 0.23 `getFiles` + `ignorer`): `.git`, every dotfile and dot-directory, `*.*~`, `node_modules` and `bower_components` stay home, but `backup.sql`, keys and `*.map` ship.
+- `.surgeignore` is read the way Surge reads it, including `!` re-includes — a `!.env` line puts your `.env` back on the line, and airing flags it. Fixes and remedies name `.surgeignore`.
+- Cross-checked in CI: the real `surge-ignore@0.3.0` list through the `ignore` library with a verbatim copy of the surge-stream walker, against four `.surgeignore` variants (none, `!.env`, `!.well-known`, `!.git`).
+- `airing guard`, the Claude Code hook and `package.json` script detection recognise `surge <dir> <domain>`, `surge publish <dir>`, `surge -p <dir> -d <domain>` and bare `surge`, and skip `surge list|teardown|login…`.
+- The all-host matrix stays within 120 columns with 8 hosts (long labels shorten as `dist/…/index-8f3a.js (1 secret)`).
+- Landing: a Surge sign and a Surge row in the rules table; docs and README host tables updated; demo GIF re-recorded.
 
-### In v0.1.0
-- `airing [dir]`: the real upload set for Cloudflare Pages, Cloudflare Workers assets, Vercel, Netlify, Firebase Hosting, GitHub Pages (Actions) and gh-pages. It detects host and deploy dir from wrangler / netlify / firebase / vercel config, `package.json` scripts and workflows, and shows an all-host matrix when nothing is configured. Each finding comes with one fix in the host's own terms (deploy `dist`, `.assetsignore`, `.vercelignore`, `hosting.ignore`).
-- Content rules: env files, `.git/`, private keys, cloud credentials, npm/PyPI tokens, DB dumps, source maps with `sourcesContent`, provider keys compiled into bundles, and coding-agent settings (`.claude/`, …).
-- `airing probe <url>`: about 40 well-known paths plus the source maps of the page's own scripts. It is soft-404 aware, so an SPA catch-all never counts, and every hit is content-validated.
-- `airing guard -- <deploy cmd>`, `airing hook` (Claude Code `PreToolUse` deny with the fix), `airing mcp` (read-only: `scan_deploy`, `probe_url`, `host_rules`).
-- GitHub Action `Blackman99/airing@v0`: it annotates files, writes a job summary and outputs `leaks` / `risks` / `json`.
+### Everything else (since v0.1.0)
+- `airing [dir]`: the real upload set for Cloudflare Pages, Cloudflare Workers assets, Vercel, Netlify, Firebase Hosting, GitHub Pages (Actions), gh-pages and Surge, auto-detected from config, `package.json` scripts and workflows. Each finding comes with one fix in the host's own terms.
+- `airing probe <url>` (soft-404 aware, content-validated), `airing guard -- <deploy cmd>`, `airing hook` (Claude Code `PreToolUse`), `airing mcp` (read-only: `scan_deploy`, `probe_url`, `host_rules`), GitHub Action `Blackman99/airing@v0`.
 - Exit codes: `0` clean, `1` would leak or is leaking, `2` usage or I/O error.
 
 ### Install
