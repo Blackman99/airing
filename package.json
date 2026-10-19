@@ -1,6 +1,6 @@
 {
   "name": "airing",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "What is your deploy airing in public? Before your agent runs wrangler / vercel / netlify / firebase deploy, see which .env, .git, keys and source maps that host would publish — and probe the live site for what already is.",
   "type": "module",
   "bin": {

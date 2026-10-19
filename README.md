@@ -111,7 +111,7 @@ airing is **not on the npm registry yet** (so `npx airing` won't find it). Run i
 ```bash
 npx github:Blackman99/airing .        # one-off, nothing installed
 npm i -g https://github.com/Blackman99/airing/releases/latest/download/airing.tgz   # the `airing` command (latest release)
-npm i -g https://github.com/Blackman99/airing/releases/download/v0.1.0/airing-0.1.0.tgz   # pinned
+npm i -g https://github.com/Blackman99/airing/releases/download/v0.2.0/airing-0.2.0.tgz   # pinned
 ```
 
 Node 18.17+. Full reference, configuration and FAQ: [docs](https://blackman99.github.io/airing/docs/).
