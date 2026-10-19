@@ -200,9 +200,40 @@ export function deploymentsFromCommand(line: string): Deployment[] {
     } else if (bin === "gh-pages") {
       const dir = DIR_FLAG(cmd, ["-d", "--dist"]) ?? ".";
       out.push({ host: "gh-pages", dir: norm(dir), source: "command", opts: { ghPagesDotfiles: rest.includes("--dotfiles") || rest.includes("-t") } });
+    } else if (bin === "surge") {
+      const dir = surgeProject(rest);
+      if (dir !== undefined) out.push({ host: "surge", dir: norm(dir), source: "command", opts: {} });
     }
   }
   return out;
 }
 
-export const HOST_ORDER: HostId[] = ["cf-pages", "cf-workers", "vercel", "netlify", "firebase", "github-pages", "gh-pages"];
+// surge's router (lib/surge.js): `surge [publish|deploy] <path> [domain]`, `surge <path> -d <domain>`,
+// `surge -p <path> -d <domain>` publish; every other verb (list, teardown, login…) uploads nothing.
+const SURGE_VERBS = new Set(["login", "logout", "whoami", "verify", "mfa", "list", "revs", "rollback", "rollfore", "cutover", "discard", "teardown", "status", "token", "tokens", "ssl", "plan", "card", "invite", "revoke", "encrypt", "config", "dns", "zone", "debug", "stats", "account", "certs", "files", "audit", "bust", "usage", "traffic", "load", "audience", "nuke", "plus"]);
+const SURGE_VALUE_FLAGS = new Set(["-p", "--project", "-d", "--domain", "-e", "--endpoint", "-m", "--message", "-a", "--add", "-r", "--remove", "--build"]);
+function surgeProject(rest: string[]): string | undefined {
+  const pos: string[] = [];
+  const flags = new Map<string, string>();
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    const eq = /^(--?[a-z-]+)=(.*)$/.exec(a);
+    if (eq) flags.set(eq[1], eq[2]);
+    else if (SURGE_VALUE_FLAGS.has(a)) flags.set(a, rest[++i] ?? "");
+    else if (a.startsWith("-")) flags.set(a, "");
+    else pos.push(a);
+  }
+  if (flags.has("-h") || flags.has("--help") || flags.has("-V") || flags.has("--version")) return undefined;
+  const project = flags.get("-p") ?? flags.get("--project");
+  const intent = project !== undefined || [...flags.keys()].some((f) => /^(-d|--domain|--stage|-s|--preview|-m|--message|-a|--add|-r|--remove|--build|--private|--public)$/.test(f));
+  if (pos[0] === "publish" || pos[0] === "deploy") return project ?? pos[1] ?? ".";
+  if (pos[0] && SURGE_VERBS.has(pos[0])) return undefined;
+  if (pos[1] && pos[1] !== "publish" && pos[1] !== "deploy" && SURGE_VERBS.has(pos[1])) return undefined; // surge <proj> <verb>
+  if (pos[0] && /\.html?$/i.test(pos[0])) return undefined; // a one-file project: nothing else goes up
+  if (pos[0]) return project ?? pos[0];
+  // bare `surge` (or flags only): surge 0.45 prints help, older releases prompt with the cwd as the
+  // default project and publish it, so check the cwd
+  return project ?? (intent || !pos.length ? "." : undefined);
+}
+
+export const HOST_ORDER: HostId[] = ["cf-pages", "cf-workers", "vercel", "netlify", "firebase", "github-pages", "gh-pages", "surge"];

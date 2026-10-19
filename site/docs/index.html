@@ -9,7 +9,7 @@
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="airing">
 <meta property="og:title" content="airing docs — what each host hangs out in public">
-<meta property="og:description" content="CLI, probe, guard, Claude Code hook, MCP and GitHub Action — plus the real upload rules of Cloudflare, Vercel, Netlify, Firebase and GitHub Pages.">
+<meta property="og:description" content="CLI, probe, guard, Claude Code hook, MCP and GitHub Action — plus the real upload rules of Cloudflare, Vercel, Netlify, Firebase, GitHub Pages and Surge.">
 <meta property="og:url" content="https://blackman99.github.io/airing/docs/">
 <meta property="og:image" content="https://blackman99.github.io/airing/og.png">
 <meta property="og:image:width" content="1200">
@@ -62,7 +62,7 @@ airing --matrix              # every host, even if config names one</pre>
 airing probe https://blackman99.github.io/airing/leaky-demo/   # our deliberately leaky page</pre>
   <p class="aside">Only probe sites you own. If a key turns up, rotate it before anything else. Deleting the file does not undo a download, and on Cloudflare Pages your old deployments (<code>&lt;hash&gt;.&lt;project&gt;.pages.dev</code>) keep serving it.</p>
   <h3>Stop the deploy: <code>airing guard -- &lt;cmd&gt;</code></h3>
-  <p>Put <code>airing guard --</code> in front of a deploy command. airing works out what that exact command would upload (wrangler, vercel, netlify, firebase or gh-pages, including through npx, pnpm dlx, bunx and env prefixes) and runs the command only if nothing would leak. If something would leak, it exits 1 and the deploy does not run.</p>
+  <p>Put <code>airing guard --</code> in front of a deploy command. airing works out what that exact command would upload (wrangler, vercel, netlify, firebase, gh-pages or surge, including through npx, pnpm dlx, bunx and env prefixes) and runs the command only if nothing would leak. If something would leak, it exits 1 and the deploy does not run.</p>
   <pre class="code" tabindex="0">airing guard -- wrangler pages deploy dist
 airing guard -- npx vercel --prod</pre>
   <h3>Claude Code hook: <code>airing hook</code></h3>
@@ -105,7 +105,7 @@ airing guard -- npx vercel --prod</pre>
       <tr><td><code>netlify.toml</code></td><td><code>build.publish</code> (and <code>build.base</code>)</td></tr>
       <tr><td><code>firebase.json</code></td><td><code>hosting.public</code> and <code>hosting.ignore</code></td></tr>
       <tr><td><code>vercel.json</code>, <code>.vercel/project.json</code></td><td>a Vercel project. With no build script it is served as-is, otherwise files go to the build machine.</td></tr>
-      <tr><td><code>package.json</code> scripts</td><td>any <code>wrangler</code> / <code>vercel</code> / <code>netlify</code> / <code>firebase</code> / <code>gh-pages</code> deploy command</td></tr>
+      <tr><td><code>package.json</code> scripts</td><td>any <code>wrangler</code> / <code>vercel</code> / <code>netlify</code> / <code>firebase</code> / <code>gh-pages</code> / <code>surge</code> deploy command</td></tr>
       <tr><td><code>.github/workflows/*.yml</code></td><td><code>actions/upload-pages-artifact</code> <code>path</code> and <code>include-hidden-files</code>, plus <code>cloudflare/wrangler-action</code> commands</td></tr>
       <tr><td><code>.assetsignore</code>, <code>.vercelignore</code></td><td>applied the way the host applies them (the <code>ignore</code> package, i.e. gitignore syntax)</td></tr>
     </tbody>
@@ -113,7 +113,7 @@ airing guard -- npx vercel --prod</pre>
   <h3>Flags</h3>
   <table class="plain">
     <tbody>
-      <tr><td><code>--host &lt;id&gt;</code></td><td><code>cf-pages</code> · <code>cf-workers</code> · <code>vercel</code> · <code>netlify</code> · <code>firebase</code> · <code>github-pages</code> · <code>gh-pages</code></td></tr>
+      <tr><td><code>--host &lt;id&gt;</code></td><td><code>cf-pages</code> · <code>cf-workers</code> · <code>vercel</code> · <code>netlify</code> · <code>firebase</code> · <code>github-pages</code> · <code>gh-pages</code> · <code>surge</code></td></tr>
       <tr><td><code>--dir &lt;path&gt;</code></td><td>the directory you deploy, relative to <code>[dir]</code></td></tr>
       <tr><td><code>--fail-on</code></td><td><code>leak</code> (default), <code>risk</code> or <code>never</code></td></tr>
       <tr><td><code>--json</code> / <code>--markdown</code></td><td>machine output and PR-comment output. Neither ever contains a value.</td></tr>
@@ -128,7 +128,7 @@ airing guard -- npx vercel --prod</pre>
   <p class="no">iv</p>
   <h2>Reference</h2>
   <h3>What each host uploads</h3>
-  <p>Every rule is ported from the host CLI's own source, which each host name links to. CI cross-checks the ports against <code>@vercel/client</code>'s <code>buildFileTree</code>, <code>glob@10</code> (firebase-tools), <code>tinyglobby</code> (gh-pages), real GNU <code>tar</code> (upload-pages-artifact) and verbatim copies of the wrangler and netlify walkers.</p>
+  <p>Every rule is ported from the host CLI's own source, which each host name links to. CI cross-checks the ports against <code>@vercel/client</code>'s <code>buildFileTree</code>, <code>glob@10</code> (firebase-tools), <code>tinyglobby</code> (gh-pages), <code>surge-ignore</code> with the <code>ignore</code> library (Surge), real GNU <code>tar</code> (upload-pages-artifact) and verbatim copies of the wrangler, netlify and surge-stream walkers.</p>
   <table class="plain hosts-ref">
     <thead><tr><th>host</th><th>skips</th><th>so this goes public</th></tr></thead>
     <tbody>
@@ -139,6 +139,7 @@ airing guard -- npx vercel --prod</pre>
       <tr><th><a href="https://github.com/firebase/firebase-tools/blob/main/src/listFiles.ts">Firebase Hosting</a></th><td><code>firebase-debug*.log</code>, <code>.firebase/</code> + <code>hosting.ignore</code></td><td>dotfiles too (<code>dot: true</code>). The default <code>firebase init</code> ignore list is the only protection.</td></tr>
       <tr><th><a href="https://github.com/actions/upload-pages-artifact/blob/main/action.yml">GitHub Pages</a></th><td><code>.git</code>, <code>.github</code>, and every dotfile unless <code>include-hidden-files: true</code></td><td>non-dot files such as <code>backup.sql</code> and <code>*.map</code>, plus dotfiles when hidden files are included</td></tr>
       <tr><th><a href="https://github.com/tschaub/gh-pages/blob/main/lib/index.js">gh-pages</a></th><td>dotfiles unless <code>--dotfiles</code></td><td><code>node_modules/</code> and every non-dot file</td></tr>
+      <tr><th><a href="https://github.com/sintaxi/surge-sdk/blob/master/stream/lib/stream.js">Surge</a></th><td><code>.git</code>, every dotfile and dot-directory (<code>.*</code>), <code>*.*~</code>, <code>node_modules</code>, <code>bower_components</code> + <code>.surgeignore</code></td><td>non-dot files such as <code>backup.sql</code>, <code>id_rsa</code> and <code>*.map</code>; dotfiles too if <code>.surgeignore</code> un-ignores them with <code>!</code></td></tr>
     </tbody>
   </table>
   <h3>Findings</h3>
@@ -157,7 +158,7 @@ airing guard -- npx vercel --prod</pre>
   <p class="no">v</p>
   <h2>FAQ</h2>
   <h3>My <code>.gitignore</code> has <code>.env</code>. Am I safe?</h3>
-  <p>Not when you deploy with a CLI. <code>wrangler</code>, <code>vercel</code>, <code>netlify</code>, <code>firebase</code> and <code>gh-pages</code> all upload from your disk and none of them read <code>.gitignore</code>. Git-connected builds are different: there the host clones your repo, so ignored files never reach it.</p>
+  <p>Not when you deploy with a CLI. <code>wrangler</code>, <code>vercel</code>, <code>netlify</code>, <code>firebase</code>, <code>gh-pages</code> and <code>surge</code> all upload from your disk and none of them read <code>.gitignore</code>. Git-connected builds are different: there the host clones your repo, so ignored files never reach it.</p>
   <h3>Does airing upload or print my keys?</h3>
   <p>No. It reads files locally and reports the variable name, the provider, a shape such as <code>AIza…(39 chars)</code> and the first 8 hex characters of the value's SHA-256. That is enough to tell which key it is, and not enough to use it. The tests check that values never show up in any output format.</p>
   <h3>Why does Vercel show "uploaded" instead of "public"?</h3>

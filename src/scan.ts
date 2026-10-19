@@ -44,6 +44,8 @@ export function fixFor(host: HostId, path: string, rule: string, dirLabel: strin
       return `remove it from ${dirLabel}, or drop include-hidden-files: true`;
     case "gh-pages":
       return `remove it from ${dirLabel}, or drop --dotfiles`;
+    case "surge":
+      return `add "${pat}" to ${dirLabel === "." ? "" : dirLabel + "/"}.surgeignore (and drop any !${pat} line there)`;
   }
 }
 
@@ -69,6 +71,7 @@ const SERVER_SIDE: Record<string, string> = {
   firebase: "a Cloud Function, key in Secret Manager",
   "github-pages": "a serverless function on another host — GitHub Pages is static only",
   "gh-pages": "a serverless function on another host — GitHub Pages is static only",
+  surge: "a serverless function on another host — Surge is static only",
 };
 
 const BUILD_DIRS = ["dist", "build", "out", "public", "_site", ".output/public", "www"];
@@ -83,7 +86,7 @@ export function remedyFor(tree: Tree, d: Deployment, findings: Finding[]): Remed
     notes.push(`${f.path}: the key is compiled into code you serve — no ignore file can hide it. Move the call server-side (${SERVER_SIDE[d.host]}), or if it is a browser key, restrict it by HTTP referrer and API.`);
   const ignorable = bad.filter((f) => !(f.rule === "inline-secret" && !f.path.endsWith(".map")));
   // hosts with an ignore file get patterns; for the rest you move files, so name the files
-  const patterns = d.host === "cf-workers" || d.host === "vercel" || d.host === "firebase";
+  const patterns = d.host === "cf-workers" || d.host === "vercel" || d.host === "firebase" || d.host === "surge";
   const agentDir = (p: string) => { const s = p.split("/"); const i = s.findIndex((x) => x.startsWith(".")); return s.slice(0, i + 1).join("/"); };
   const line = (f: Finding) =>
     f.rule === "source-map" || f.path.endsWith(".map") ? "*.map"
@@ -94,8 +97,8 @@ export function remedyFor(tree: Tree, d: Deployment, findings: Finding[]): Remed
   const atRoot = d.dir === "." && tree.files.some((f) => f.path === "package.json");
   const build = atRoot ? BUILD_DIRS.find((b) => tree.files.some((f) => f.path.startsWith(b + "/") && /\.html?$/.test(f.path))) : undefined;
   const r = (say: string, extra: Partial<Remedy> = {}): Remedy => ({ say, lines: lines.length ? lines : undefined, notes: notes.length ? notes : undefined, ...extra });
-  if (build && ["cf-pages", "netlify", "gh-pages", "firebase", "github-pages"].includes(d.host)) {
-    const cmd = { "cf-pages": `wrangler pages deploy ${build}`, netlify: `netlify deploy --dir ${build}`, "gh-pages": `gh-pages -d ${build}`, firebase: `set "public": "${build}" in firebase.json`, "github-pages": `path: ${build}` }[d.host as "cf-pages"];
+  if (build && ["cf-pages", "netlify", "gh-pages", "firebase", "github-pages", "surge"].includes(d.host)) {
+    const cmd = { "cf-pages": `wrangler pages deploy ${build}`, netlify: `netlify deploy --dir ${build}`, "gh-pages": `gh-pages -d ${build}`, firebase: `set "public": "${build}" in firebase.json`, "github-pages": `path: ${build}`, surge: `surge ${build} <domain>` }[d.host as "cf-pages"];
     return r(`you are deploying the project root — deploy the build output instead: ${cmd}`, { lines: undefined });
   }
   if (!lines.length) return r("");
@@ -114,6 +117,8 @@ export function remedyFor(tree: Tree, d: Deployment, findings: Finding[]): Remed
       return r(d.opts.includeHiddenFiles ? "drop include-hidden-files: true, or move these out of the artifact path" : `move these out of the artifact path${dir ? " " + dir : ""}`);
     case "gh-pages":
       return r(d.opts.ghPagesDotfiles ? "drop --dotfiles, or move these out" : `move these out of ${dir || "the folder you pass to gh-pages -d"}`);
+    case "surge":
+      return r(`add to ${dir}.surgeignore (and delete any "!" line there that re-includes them)`, { file: `${dir}.surgeignore` });
   }
 }
 
@@ -128,6 +133,7 @@ export async function scanDeployment(tree: Tree, d: Deployment): Promise<Deploym
       opts: d.opts,
       vercelignore: d.host === "vercel" ? ((await read(".vercelignore")) ?? (await read(".nowignore"))) : undefined,
       assetsignore: d.host === "cf-workers" ? await read(".assetsignore") : undefined,
+      surgeignore: d.host === "surge" ? await read(".surgeignore") : undefined,
     },
     { hasCargo: inDir.some((f) => f.rel === "Cargo.toml") },
   );

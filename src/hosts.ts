@@ -64,6 +64,13 @@ export const HOSTS: Record<HostId, HostInfo> = {
     skips: "dotfiles unless --dotfiles; node_modules is NOT skipped",
     source: "https://github.com/tschaub/gh-pages/blob/main/lib/index.js",
   },
+  surge: {
+    id: "surge",
+    name: "Surge",
+    command: "surge <dir> <domain>",
+    skips: ".git, every dotfile and dot-directory, *.*~, node_modules, bower_components + .surgeignore (which can un-ignore with !)",
+    source: "https://github.com/sintaxi/surge-sdk/blob/master/stream/lib/stream.js",
+  },
 };
 
 export const HOST_IDS = Object.keys(HOSTS) as HostId[];
@@ -84,6 +91,8 @@ export interface HostFilterInput {
   vercelignore?: string;
   /** contents of .assetsignore in the assets dir, if any */
   assetsignore?: string;
+  /** contents of .surgeignore in the project dir, if any */
+  surgeignore?: string;
 }
 
 type Filter = (path: string) => FateResult;
@@ -211,6 +220,27 @@ function ghPages(input: HostFilterInput): Filter {
   };
 }
 
+// --- Surge -----------------------------------------------------------------------------------
+// surge-stream getFiles(): readdir walk; a directory is pruned when ig.ignores(rel + "/"), a file
+// kept unless ig.ignores(rel). ig = ignore().add(surge-ignore defaults).add(.surgeignore text).
+export const SURGE_DEFAULT_IGNORES = [".git", ".*", "*.*~", "node_modules", "bower_components"];
+function surge(input: HostFilterInput): Filter {
+  const ig = ignore().add(SURGE_DEFAULT_IGNORES);
+  if (input.surgeignore) ig.add(input.surgeignore);
+  const defIg = ignore().add(SURGE_DEFAULT_IGNORES);
+  const why = (rel: string) =>
+    !defIg.ignores(rel) ? ".surgeignore" : /(^|\/)\.[^/]*\/?$/.test(rel) ? "Surge skips dotfiles" : /~$/.test(rel) ? "Surge skips editor backups (*.*~)" : `Surge default ignore`;
+  return (path) => {
+    const s = segs(path);
+    for (let i = 1; i < s.length; i++) {
+      const dir = s.slice(0, i).join("/") + "/";
+      if (ig.ignores(dir)) return { fate: "home", why: why(dir) };
+    }
+    if (ig.ignores(path)) return { fate: "home", why: why(path) };
+    return { fate: "public" };
+  };
+}
+
 export function hostFilter(host: HostId, input: HostFilterInput, ctx: { hasCargo?: boolean } = {}): Filter {
   switch (host) {
     case "cf-pages":
@@ -227,5 +257,7 @@ export function hostFilter(host: HostId, input: HostFilterInput, ctx: { hasCargo
       return githubPages(input);
     case "gh-pages":
       return ghPages(input);
+    case "surge":
+      return surge(input);
   }
 }

@@ -2,6 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { buildFileTree } from "@vercel/client";
@@ -124,5 +125,33 @@ test("netlify: same set as netlify-cli getDeployFilesFilter (algorithm copied ve
     };
     walk(root);
     assert.deepEqual(ours(root, "netlify", { opts: { netlifyAtRoot: atRoot } }), files.sort(), `atRoot=${atRoot}`);
+  }
+});
+
+test("surge: same set as surge-stream getFiles (surge-ignore defaults + .surgeignore, walker copied verbatim)", () => {
+  const surgeIgnore: string[] = createRequire(import.meta.url)("surge-ignore");
+  const { root } = vibeApp({ ...extra, "notes.txt~": "x", "draft.html~": "x", "bower_components/a.js": "x", "deep/bower_components/b.js": "x", ".well-known/assetlinks.json": "{}" });
+  for (const surgeignore of [undefined, "!.env\nbackup.sql\n", "!.well-known\n*.map\n", "!.git\n"]) {
+    // surge-stream lib/stream.js getFiles + lib/project.js ignorer, minus the symlink branch (no links here)
+    const ig = ignore().add(surgeIgnore);
+    if (surgeignore) ig.add(surgeignore);
+    const getFiles = (dir: string, prefix: string): string[] => {
+      let results: string[] = [];
+      for (const entry of readdirSync(dir)) {
+        const fullPath = join(dir, entry);
+        const relativePath = prefix ? prefix + "/" + entry : entry;
+        const stat = statSync(fullPath);
+        if (stat.isDirectory()) {
+          if (ig.ignores(relativePath + "/")) continue;
+          results = results.concat(getFiles(fullPath, relativePath));
+        } else if (stat.isFile()) {
+          if (!ig.ignores(relativePath)) results.push(relativePath);
+        }
+      }
+      return results;
+    };
+    const upstream = getFiles(root, "").sort();
+    assert.deepEqual(ours(root, "surge", { opts: {}, surgeignore }), upstream, JSON.stringify(surgeignore));
+    if (!surgeignore) assert.ok(!upstream.includes(".env") && !upstream.some((p) => p.startsWith(".git/")) && upstream.includes("backup.sql") && !upstream.includes("notes.txt~"));
   }
 });
