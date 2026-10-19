@@ -17,7 +17,7 @@ async function main() {
   const url = input("probe-url");
   const fo = (input("fail-on", "leak") || "leak") as FailOn;
   if (!["leak", "risk", "never"].includes(fo)) throw new Error(`fail-on must be leak, risk or never (got ${fo})`);
-  if (host && !isHostId(host)) throw new Error(`unknown host "${host}" — use cf-pages, cf-workers, vercel, netlify, firebase, github-pages or gh-pages (or leave it empty)`);
+  if (host && !isHostId(host)) throw new Error(`unknown host "${host}" — use cf-pages, cf-workers, vercel, netlify, firebase, github-pages, gh-pages or surge (or leave it empty)`);
   const doScan = input("scan", "true") !== "false";
   if (!doScan && !url) throw new Error("scan: false and no probe-url — nothing to check. Set probe-url, or drop scan: false");
   if (doScan && !existsSync(path)) throw new Error(`path "${path}" does not exist in the workspace — did you forget actions/checkout, or run this before the build step?`);

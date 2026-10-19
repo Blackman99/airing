@@ -2795,6 +2795,13 @@ var HOSTS = {
     command: "gh-pages -d <dir>",
     skips: "dotfiles unless --dotfiles; node_modules is NOT skipped",
     source: "https://github.com/tschaub/gh-pages/blob/main/lib/index.js"
+  },
+  surge: {
+    id: "surge",
+    name: "Surge",
+    command: "surge <dir> <domain>",
+    skips: ".git, every dotfile and dot-directory, *.*~, node_modules, bower_components + .surgeignore (which can un-ignore with !)",
+    source: "https://github.com/sintaxi/surge-sdk/blob/master/stream/lib/stream.js"
   }
 };
 var HOST_IDS = Object.keys(HOSTS);
@@ -2925,6 +2932,22 @@ function ghPages(input) {
     return { fate: "public" };
   };
 }
+var SURGE_DEFAULT_IGNORES = [".git", ".*", "*.*~", "node_modules", "bower_components"];
+function surge(input) {
+  const ig = (0, import_ignore.default)().add(SURGE_DEFAULT_IGNORES);
+  if (input.surgeignore) ig.add(input.surgeignore);
+  const defIg = (0, import_ignore.default)().add(SURGE_DEFAULT_IGNORES);
+  const why = (rel) => !defIg.ignores(rel) ? ".surgeignore" : /(^|\/)\.[^/]*\/?$/.test(rel) ? "Surge skips dotfiles" : /~$/.test(rel) ? "Surge skips editor backups (*.*~)" : `Surge default ignore`;
+  return (path2) => {
+    const s = segs(path2);
+    for (let i = 1; i < s.length; i++) {
+      const dir = s.slice(0, i).join("/") + "/";
+      if (ig.ignores(dir)) return { fate: "home", why: why(dir) };
+    }
+    if (ig.ignores(path2)) return { fate: "home", why: why(path2) };
+    return { fate: "public" };
+  };
+}
 function hostFilter(host, input, ctx = {}) {
   switch (host) {
     case "cf-pages":
@@ -2941,6 +2964,8 @@ function hostFilter(host, input, ctx = {}) {
       return githubPages(input);
     case "gh-pages":
       return ghPages(input);
+    case "surge":
+      return surge(input);
   }
 }
 
@@ -3036,7 +3061,7 @@ function verdict(st, r, o = {}) {
   if (risks) return st.risk(`! no secrets, ${risks} risk${risks === 1 ? "" : "s"} worth a look.`) + st.dim(" exit 0 (use --fail-on risk to block)");
   return st.ok("\u2713 clean: nothing secret in the upload set.") + st.dim(" airing only reads; nothing was uploaded.");
 }
-var SHORT = { "cf-pages": "CF Pages", "cf-workers": "CF Workers", vercel: "Vercel", netlify: "Netlify", firebase: "Firebase", "github-pages": "GH Pages", "gh-pages": "gh-pages" };
+var SHORT = { "cf-pages": "CF Pages", "cf-workers": "CF Workers", vercel: "Vercel", netlify: "Netlify", firebase: "Firebase", "github-pages": "GH Pages", "gh-pages": "gh-pages", surge: "Surge" };
 function matrixRows(r) {
   const rows = /* @__PURE__ */ new Map();
   for (const d of r.deployments) {
@@ -3057,6 +3082,18 @@ function matrixRows(r) {
     }
   return [...rows.values()];
 }
+function fitLabel(label, max) {
+  if (label.length <= max) return label;
+  const m = / \(\d+ secrets?\)$/.exec(label);
+  const tag = m ? m[0] : "";
+  const path2 = label.slice(0, label.length - tag.length);
+  const room = max - tag.length;
+  const slash = path2.lastIndexOf("/", path2.length - 2);
+  const head = slash > 0 ? path2.slice(0, path2.indexOf("/") + 1) : "";
+  const tail = slash > 0 ? path2.slice(slash) : path2;
+  const short = head && head.length + 1 + tail.length <= room ? head + "\u2026" + tail : "\u2026" + path2.slice(-(room - 1));
+  return room > 4 ? short + tag : label.slice(0, max - 1) + "\u2026";
+}
 function matrixText(st, r, _o) {
   const out = [];
   const dir = r.deployments[0]?.deployment.dir ?? ".";
@@ -3067,7 +3104,7 @@ function matrixText(st, r, _o) {
     out.push(st.ok("  every host: nothing secret in this folder."));
     return out;
   }
-  const w = Math.min(38, Math.max(...rows.map((x) => x.label.length), 10)) + 2;
+  const w = Math.min(34, Math.max(...rows.map((x) => x.label.length), 10)) + 2;
   out.push(("  " + pad("", w) + r.deployments.map((d, i, all) => st.dim(i === all.length - 1 ? SHORT[d.deployment.host] : pad(SHORT[d.deployment.host], 11))).join("")).trimEnd());
   for (const row of rows) {
     const cells = r.deployments.map((d) => {
@@ -3077,7 +3114,7 @@ function matrixText(st, r, _o) {
       const styled = txt === "PUBLIC" ? st.leak(txt) : txt === "home" ? st.ok(txt) : st.risk(txt);
       return styled + " ".repeat(Math.max(0, 11 - txt.length));
     });
-    out.push(("  " + st.path(pad(row.label.length > w - 2 ? row.label.slice(0, w - 3) + "\u2026" : row.label, w)) + cells.join("")).trimEnd());
+    out.push(("  " + st.path(pad(fitLabel(row.label, w - 2), w)) + cells.join("")).trimEnd());
   }
   return out;
 }
@@ -4488,11 +4525,37 @@ function deploymentsFromCommand(line) {
     } else if (bin === "gh-pages") {
       const dir = DIR_FLAG(cmd, ["-d", "--dist"]) ?? ".";
       out.push({ host: "gh-pages", dir: norm(dir), source: "command", opts: { ghPagesDotfiles: rest.includes("--dotfiles") || rest.includes("-t") } });
+    } else if (bin === "surge") {
+      const dir = surgeProject(rest);
+      if (dir !== void 0) out.push({ host: "surge", dir: norm(dir), source: "command", opts: {} });
     }
   }
   return out;
 }
-var HOST_ORDER = ["cf-pages", "cf-workers", "vercel", "netlify", "firebase", "github-pages", "gh-pages"];
+var SURGE_VERBS = /* @__PURE__ */ new Set(["login", "logout", "whoami", "verify", "mfa", "list", "revs", "rollback", "rollfore", "cutover", "discard", "teardown", "status", "token", "tokens", "ssl", "plan", "card", "invite", "revoke", "encrypt", "config", "dns", "zone", "debug", "stats", "account", "certs", "files", "audit", "bust", "usage", "traffic", "load", "audience", "nuke", "plus"]);
+var SURGE_VALUE_FLAGS = /* @__PURE__ */ new Set(["-p", "--project", "-d", "--domain", "-e", "--endpoint", "-m", "--message", "-a", "--add", "-r", "--remove", "--build"]);
+function surgeProject(rest) {
+  const pos = [];
+  const flags = /* @__PURE__ */ new Map();
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    const eq = /^(--?[a-z-]+)=(.*)$/.exec(a);
+    if (eq) flags.set(eq[1], eq[2]);
+    else if (SURGE_VALUE_FLAGS.has(a)) flags.set(a, rest[++i] ?? "");
+    else if (a.startsWith("-")) flags.set(a, "");
+    else pos.push(a);
+  }
+  if (flags.has("-h") || flags.has("--help") || flags.has("-V") || flags.has("--version")) return void 0;
+  const project = flags.get("-p") ?? flags.get("--project");
+  const intent = project !== void 0 || [...flags.keys()].some((f2) => /^(-d|--domain|--stage|-s|--preview|-m|--message|-a|--add|-r|--remove|--build|--private|--public)$/.test(f2));
+  if (pos[0] === "publish" || pos[0] === "deploy") return project ?? pos[1] ?? ".";
+  if (pos[0] && SURGE_VERBS.has(pos[0])) return void 0;
+  if (pos[1] && pos[1] !== "publish" && pos[1] !== "deploy" && SURGE_VERBS.has(pos[1])) return void 0;
+  if (pos[0] && /\.html?$/i.test(pos[0])) return void 0;
+  if (pos[0]) return project ?? pos[0];
+  return project ?? (intent || !pos.length ? "." : void 0);
+}
+var HOST_ORDER = ["cf-pages", "cf-workers", "vercel", "netlify", "firebase", "github-pages", "gh-pages", "surge"];
 
 // src/scan.ts
 var RANK = { LEAK: 3, RISK: 2, INFO: 1 };
@@ -4518,6 +4581,8 @@ function fixFor(host, path2, rule, dirLabel) {
       return `remove it from ${dirLabel}, or drop include-hidden-files: true`;
     case "gh-pages":
       return `remove it from ${dirLabel}, or drop --dotfiles`;
+    case "surge":
+      return `add "${pat}" to ${dirLabel === "." ? "" : dirLabel + "/"}.surgeignore (and drop any !${pat} line there)`;
   }
 }
 async function mapLimit(items, n, fn) {
@@ -4540,7 +4605,8 @@ var SERVER_SIDE = {
   netlify: "a Netlify Function, key in Site configuration \u2192 Environment variables",
   firebase: "a Cloud Function, key in Secret Manager",
   "github-pages": "a serverless function on another host \u2014 GitHub Pages is static only",
-  "gh-pages": "a serverless function on another host \u2014 GitHub Pages is static only"
+  "gh-pages": "a serverless function on another host \u2014 GitHub Pages is static only",
+  surge: "a serverless function on another host \u2014 Surge is static only"
 };
 var BUILD_DIRS = ["dist", "build", "out", "public", "_site", ".output/public", "www"];
 function remedyFor(tree, d, findings) {
@@ -4551,7 +4617,7 @@ function remedyFor(tree, d, findings) {
   for (const f2 of bad.filter((f3) => f3.rule === "inline-secret" && !f3.path.endsWith(".map")))
     notes.push(`${f2.path}: the key is compiled into code you serve \u2014 no ignore file can hide it. Move the call server-side (${SERVER_SIDE[d.host]}), or if it is a browser key, restrict it by HTTP referrer and API.`);
   const ignorable = bad.filter((f2) => !(f2.rule === "inline-secret" && !f2.path.endsWith(".map")));
-  const patterns = d.host === "cf-workers" || d.host === "vercel" || d.host === "firebase";
+  const patterns = d.host === "cf-workers" || d.host === "vercel" || d.host === "firebase" || d.host === "surge";
   const agentDir = (p) => {
     const s = p.split("/");
     const i = s.findIndex((x) => x.startsWith("."));
@@ -4563,8 +4629,8 @@ function remedyFor(tree, d, findings) {
   const atRoot = d.dir === "." && tree.files.some((f2) => f2.path === "package.json");
   const build = atRoot ? BUILD_DIRS.find((b) => tree.files.some((f2) => f2.path.startsWith(b + "/") && /\.html?$/.test(f2.path))) : void 0;
   const r = (say, extra = {}) => ({ say, lines: lines.length ? lines : void 0, notes: notes.length ? notes : void 0, ...extra });
-  if (build && ["cf-pages", "netlify", "gh-pages", "firebase", "github-pages"].includes(d.host)) {
-    const cmd = { "cf-pages": `wrangler pages deploy ${build}`, netlify: `netlify deploy --dir ${build}`, "gh-pages": `gh-pages -d ${build}`, firebase: `set "public": "${build}" in firebase.json`, "github-pages": `path: ${build}` }[d.host];
+  if (build && ["cf-pages", "netlify", "gh-pages", "firebase", "github-pages", "surge"].includes(d.host)) {
+    const cmd = { "cf-pages": `wrangler pages deploy ${build}`, netlify: `netlify deploy --dir ${build}`, "gh-pages": `gh-pages -d ${build}`, firebase: `set "public": "${build}" in firebase.json`, "github-pages": `path: ${build}`, surge: `surge ${build} <domain>` }[d.host];
     return r(`you are deploying the project root \u2014 deploy the build output instead: ${cmd}`, { lines: void 0 });
   }
   if (!lines.length) return r("");
@@ -4583,6 +4649,8 @@ function remedyFor(tree, d, findings) {
       return r(d.opts.includeHiddenFiles ? "drop include-hidden-files: true, or move these out of the artifact path" : `move these out of the artifact path${dir ? " " + dir : ""}`);
     case "gh-pages":
       return r(d.opts.ghPagesDotfiles ? "drop --dotfiles, or move these out" : `move these out of ${dir || "the folder you pass to gh-pages -d"}`);
+    case "surge":
+      return r(`add to ${dir}.surgeignore (and delete any "!" line there that re-includes them)`, { file: `${dir}.surgeignore` });
   }
 }
 async function scanDeployment(tree, d) {
@@ -4595,7 +4663,8 @@ async function scanDeployment(tree, d) {
     {
       opts: d.opts,
       vercelignore: d.host === "vercel" ? await read(".vercelignore") ?? await read(".nowignore") : void 0,
-      assetsignore: d.host === "cf-workers" ? await read(".assetsignore") : void 0
+      assetsignore: d.host === "cf-workers" ? await read(".assetsignore") : void 0,
+      surgeignore: d.host === "surge" ? await read(".surgeignore") : void 0
     },
     { hasCargo: inDir.some((f2) => f2.rel === "Cargo.toml") }
   );
@@ -5027,7 +5096,7 @@ function parseDeployLine(line, cwd) {
 var TOOLS = [
   {
     name: "scan_deploy",
-    description: "Before running a deploy command (wrangler pages deploy, wrangler deploy with assets, vercel, netlify deploy, firebase deploy, actions/upload-pages-artifact, gh-pages), resolve exactly which files that host would upload from a directory using the host's own ignore rules, and report anything secret that would become public: .env / .dev.vars files with secret-looking variables, .git/, private keys, cloud credential files, database dumps, source maps with original source, provider API keys baked into bundles. Secret values are never returned (names, shapes and sha256 fingerprints only). With no host and no deploy config, checks every host. Read-only: never uploads, deploys or edits.",
+    description: "Before running a deploy command (wrangler pages deploy, wrangler deploy with assets, vercel, netlify deploy, firebase deploy, actions/upload-pages-artifact, gh-pages, surge), resolve exactly which files that host would upload from a directory using the host's own ignore rules, and report anything secret that would become public: .env / .dev.vars files with secret-looking variables, .git/, private keys, cloud credential files, database dumps, source maps with original source, provider API keys baked into bundles. Secret values are never returned (names, shapes and sha256 fingerprints only). With no host and no deploy config, checks every host. Read-only: never uploads, deploys or edits.",
     inputSchema: {
       type: "object",
       properties: {
@@ -5095,7 +5164,7 @@ async function runMcp() {
         protocolVersion: params?.protocolVersion ?? "2025-06-18",
         capabilities: { tools: {} },
         serverInfo: { name: "airing", version: VERSION },
-        instructions: "Call scan_deploy on the project before running any deploy command (wrangler, vercel, netlify, firebase, gh-pages). If it reports LEAK, do not deploy; fix the upload set first. After a deploy, probe_url checks the live site. All tools are read-only."
+        instructions: "Call scan_deploy on the project before running any deploy command (wrangler, vercel, netlify, firebase, gh-pages, surge). If it reports LEAK, do not deploy; fix the upload set first. After a deploy, probe_url checks the live site. All tools are read-only."
       });
     } else if (method === "ping") reply({});
     else if (method === "tools/list") reply({ tools: TOOLS });
@@ -5231,7 +5300,7 @@ async function main(argv) {
     const { cwd, deployments } = parseDeployLine(line, process.cwd());
     const fo2 = failOn(a);
     if (!deployments.length) {
-      console.error(style(a).risk(`airing: "${a.rest[0]}" is not a deploy command I know (wrangler, vercel, netlify, firebase, gh-pages) \u2014 running it unchecked.`));
+      console.error(style(a).risk(`airing: "${a.rest[0]}" is not a deploy command I know (wrangler, vercel, netlify, firebase, gh-pages, surge) \u2014 running it unchecked.`));
     } else {
       const r2 = await scan(nodeTree(cwd), { deployments });
       if (failed(r2.worst, fo2)) {

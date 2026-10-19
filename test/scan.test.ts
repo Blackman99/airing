@@ -19,7 +19,7 @@ test("matrix: the $90k project root, host by host", async () => {
   const { root, google } = vibeApp();
   const r = await scan(nodeTree(root));
   assert.equal(r.matrix, true);
-  assert.equal(r.deployments.length, 7);
+  assert.equal(r.deployments.length, 8);
   const pages = byHost(r, "cf-pages");
   const env = find(pages, ".env")!;
   assert.equal(env.severity, "LEAK");
@@ -43,6 +43,10 @@ test("matrix: the $90k project root, host by host", async () => {
   assert.equal(find(byHost(r, "firebase"), ".env")?.severity, "LEAK");
   // GitHub Pages artifact: hidden excluded
   assert.ok(!find(byHost(r, "github-pages"), ".env"));
+  // Surge: dotfiles and .git stay home, the SQL dump does not
+  const sg = byHost(r, "surge");
+  assert.ok(!find(sg, ".env") && !find(sg, ".dev.vars") && !find(sg, ".git/"));
+  assert.equal(find(sg, "backup.sql")?.severity, "LEAK");
   // the bundle: inline Google key is RISK (could be a restricted browser key), map with key is LEAK
   assert.equal(find(pages, "dist/assets/index-3f2a.js")?.severity, "RISK");
   assert.ok(pages.findings.some((f) => f.path === "dist/assets/index-3f2a.js.map" && f.rule === "source-map"));
@@ -125,6 +129,16 @@ test("command parsing: what an agent actually types", () => {
   assert.deepEqual(p("firebase deploy --only hosting"), ["firebase:(cfg)"]);
   assert.deepEqual(p("firebase deploy --only functions"), []);
   assert.deepEqual(p("npx gh-pages -d dist --dotfiles"), ["gh-pages:dist"]);
+  assert.deepEqual(p("npx surge ./dist my-app.surge.sh"), ["surge:dist"]);
+  assert.deepEqual(p("surge --project build --domain x.surge.sh"), ["surge:build"]);
+  assert.deepEqual(p("surge -p=out -d x.surge.sh"), ["surge:out"]);
+  assert.deepEqual(p("surge publish public"), ["surge:public"]);
+  assert.deepEqual(p("surge . _"), ["surge:."]);
+  assert.deepEqual(p("surge"), ["surge:."]);
+  assert.deepEqual(p("surge list"), []);
+  assert.deepEqual(p("surge teardown x.surge.sh"), []);
+  assert.deepEqual(p("surge x.surge.sh status"), []);
+  assert.deepEqual(p("surge --help"), []);
   assert.deepEqual(p("git push && echo done"), []);
   assert.deepEqual(p("CLOUDFLARE_ACCOUNT_ID=x npx wrangler pages deploy out"), ["cf-pages:out"]);
 });
@@ -136,4 +150,24 @@ test("connection strings built from variables are not keys", async () => {
   assert.equal(inlineSecrets("url = 'mysql://root:{{ .Password }}@db/x'").refs.length, 0);
   assert.equal(inlineSecrets("redis://u:$REDIS_PASSWORD@h:6379").refs.length, 0);
   assert.equal(inlineSecrets("postgres://app:" + "s3cr3tPassw0rd" + "@db.example.com/x").refs.length, 1);
+});
+
+test("surge: a .surgeignore that un-ignores .env publishes it, and the fix names .surgeignore", async () => {
+  const { root } = vibeApp({ ".surgeignore": "!.env\n!.well-known\n" });
+  const r = await scan(nodeTree(root), { host: "surge", dir: "." });
+  const d = r.deployments[0];
+  assert.equal(find(d, ".env")?.severity, "LEAK");
+  assert.ok(!find(d, ".dev.vars"), "only .env was re-included");
+  assert.ok(!find(d, ".git/"));
+  assert.ok(d.savedByHost.some((s) => s.path === ".dev.vars"));
+  const clean = await scan(nodeTree(writeTree({ "index.html": "<h1>hi</h1>", ".env": `OPENAI_API_KEY=${fake.openai()}\n`, "app.js": "x" })), { host: "surge", dir: "." });
+  assert.equal(clean.worst, "CLEAN");
+});
+
+test("matrix labels keep the file name and the secret count when shortened", async () => {
+  const { fitLabel } = await import("../src/format.js");
+  assert.equal(fitLabel("dist/assets/index-8f3a.js (1 secret)", 34), "dist/…/index-8f3a.js (1 secret)");
+  assert.equal(fitLabel(".env (4 secrets)", 34), ".env (4 secrets)");
+  assert.equal(fitLabel("a-very-long-file-name-without-any-folder.sql", 20), "…hout-any-folder.sql");
+  assert.equal(fitLabel("public/very/deep/folder/structure/with-a-long-name.js.map", 34), "public/…/with-a-long-name.js.map");
 });

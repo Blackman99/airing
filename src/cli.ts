@@ -138,7 +138,7 @@ async function main(argv: string[]): Promise<number> {
     const { cwd, deployments } = parseDeployLine(line, process.cwd());
     const fo = failOn(a);
     if (!deployments.length) {
-      console.error(style(a).risk(`airing: "${a.rest[0]}" is not a deploy command I know (wrangler, vercel, netlify, firebase, gh-pages) — running it unchecked.`));
+      console.error(style(a).risk(`airing: "${a.rest[0]}" is not a deploy command I know (wrangler, vercel, netlify, firebase, gh-pages, surge) — running it unchecked.`));
     } else {
       const r = await scan(nodeTree(cwd), { deployments });
       if (failed(r.worst, fo)) {

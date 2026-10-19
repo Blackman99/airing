@@ -118,7 +118,7 @@ function verdict(st: Style, r: ScanReport, o: FormatOpts = {}): string {
   return st.ok("✓ clean: nothing secret in the upload set.") + st.dim(" airing only reads; nothing was uploaded.");
 }
 
-const SHORT: Record<string, string> = { "cf-pages": "CF Pages", "cf-workers": "CF Workers", vercel: "Vercel", netlify: "Netlify", firebase: "Firebase", "github-pages": "GH Pages", "gh-pages": "gh-pages" };
+const SHORT: Record<string, string> = { "cf-pages": "CF Pages", "cf-workers": "CF Workers", vercel: "Vercel", netlify: "Netlify", firebase: "Firebase", "github-pages": "GH Pages", "gh-pages": "gh-pages", surge: "Surge" };
 
 function matrixRows(r: ScanReport) {
   const rows = new Map<string, { label: string; secretish: boolean; cells: Map<string, { sev?: Severity; home?: boolean }> }>();
@@ -141,6 +141,20 @@ function matrixRows(r: ScanReport) {
   return [...rows.values()];
 }
 
+/** Shorten a matrix label without losing the file name or its "(N secrets)" tag: dist/…/index.js (1 secret). */
+export function fitLabel(label: string, max: number): string {
+  if (label.length <= max) return label;
+  const m = / \(\d+ secrets?\)$/.exec(label);
+  const tag = m ? m[0] : "";
+  const path = label.slice(0, label.length - tag.length);
+  const room = max - tag.length;
+  const slash = path.lastIndexOf("/", path.length - 2);
+  const head = slash > 0 ? path.slice(0, path.indexOf("/") + 1) : "";
+  const tail = slash > 0 ? path.slice(slash) : path;
+  const short = head && head.length + 1 + tail.length <= room ? head + "…" + tail : "…" + path.slice(-(room - 1));
+  return room > 4 ? short + tag : label.slice(0, max - 1) + "…";
+}
+
 function matrixText(st: Style, r: ScanReport, _o: FormatOpts): string[] {
   const out: string[] = [];
   const dir = r.deployments[0]?.deployment.dir ?? ".";
@@ -151,7 +165,8 @@ function matrixText(st: Style, r: ScanReport, _o: FormatOpts): string[] {
     out.push(st.ok("  every host: nothing secret in this folder."));
     return out;
   }
-  const w = Math.min(38, Math.max(...rows.map((x) => x.label.length), 10)) + 2;
+  // 8 host columns of 11: keep the label column narrow enough that the matrix fits 120 columns
+  const w = Math.min(34, Math.max(...rows.map((x) => x.label.length), 10)) + 2;
   out.push(("  " + pad("", w) + r.deployments.map((d, i, all) => st.dim(i === all.length - 1 ? SHORT[d.deployment.host] : pad(SHORT[d.deployment.host], 11))).join("")).trimEnd());
   for (const row of rows) {
     const cells = r.deployments.map((d) => {
@@ -161,7 +176,7 @@ function matrixText(st: Style, r: ScanReport, _o: FormatOpts): string[] {
       const styled = txt === "PUBLIC" ? st.leak(txt) : txt === "home" ? st.ok(txt) : st.risk(txt);
       return styled + " ".repeat(Math.max(0, 11 - txt.length));
     });
-    out.push(("  " + st.path(pad(row.label.length > w - 2 ? row.label.slice(0, w - 3) + "…" : row.label, w)) + cells.join("")).trimEnd());
+    out.push(("  " + st.path(pad(fitLabel(row.label, w - 2), w)) + cells.join("")).trimEnd());
   }
   return out;
 }

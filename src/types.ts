@@ -1,4 +1,4 @@
-export type HostId = "cf-pages" | "cf-workers" | "vercel" | "netlify" | "firebase" | "github-pages" | "gh-pages";
+export type HostId = "cf-pages" | "cf-workers" | "vercel" | "netlify" | "firebase" | "github-pages" | "gh-pages" | "surge";
 
 /** A file in the tree, path is posix and relative to the tree root. */
 export interface Entry {
