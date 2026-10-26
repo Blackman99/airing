@@ -242,8 +242,9 @@ function drawGarment(layer, gm, i, gw, land) {
     svgEl("line", { x1: px - 2.6, x2: px + 2.6, y1: -1, y2: -1, stroke: C.ink, "stroke-width": 0.8 }, pegs);
   }
   // care label: hangs plumb on a thread from the hem, in one of three rows so names never collide
-  const lab = svgEl("g", { class: "label" }, L.labels);
-  const thread = svgEl("line", { class: "thread" });
+  // born hidden: a tag only shows once its garment is pegged, never as a heap at the origin on load
+  const lab = svgEl("g", { class: "label", style: "opacity:0" }, L.labels);
+  const thread = svgEl("line", { class: "thread", style: "opacity:0" });
   L.labels.prepend(thread); // every thread under every label: a long thread never crosses a neighbour's tag
   const fs = land ? 11 : 9.5;
   const clip = (s, n) => (s.length <= n ? s : s.slice(0, n - 1) + "…");

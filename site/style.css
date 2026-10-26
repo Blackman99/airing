@@ -75,6 +75,7 @@ a:hover { color: var(--green); }
 .land .hosts-h { color: var(--ink); }
 .tags { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 12px; }
 .hero:not(.land) .tags { grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); }
+.land .tags button:last-child:nth-child(odd) { grid-column: 1 / -1; justify-self: center; width: calc(50% - 6px); }
 .tags button {
   position: relative; font: 700 13.5px/1 var(--body); color: var(--ink); cursor: pointer;
   background: var(--grain), var(--peg); background-size: 120px 30px; border: 1.6px solid var(--ink); border-radius: 3px 3px 9px 9px;

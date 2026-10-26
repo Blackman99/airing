@@ -19,12 +19,14 @@ cdp.on("Page.screencastFrame", async (f) => {
   frames.push({ data: f.data, t: f.metadata.timestamp });
   await cdp.send("Page.screencastFrameAck", { sessionId: f.sessionId }).catch(() => {});
 });
+// start once the wide layout and the fonts are in, so frame 0 is the alley, not a half-laid-out page
+await page.waitForFunction(() => document.querySelector(".hero.land") && document.fonts.status === "loaded", { polling: 16 });
 await cdp.send("Page.startScreencast", { format: "png", everyNthFrame: 1 });
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 await wait(5200);
 await page.click('button[data-host="netlify"]');
 await wait(5000);
-await page.click('button[data-host="cf-workers"]');
+await page.click('button[data-host="aws-s3"]');
 await wait(5600);
 await cdp.send("Page.stopScreencast");
 await browser.close();
