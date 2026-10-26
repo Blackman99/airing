@@ -692,12 +692,12 @@ function renderText(rep) {
 // host tags
 function buildHosts() {
   const box = $(".hosts .tags");
-  const short = { "cf-pages": "CF Pages", "cf-workers": "CF Workers", vercel: "Vercel", netlify: "Netlify", firebase: "Firebase", "github-pages": "GitHub Pages", "gh-pages": "gh-pages npm", surge: "Surge" };
+  const short = { "cf-pages": "CF Pages", "cf-workers": "CF Workers", vercel: "Vercel", netlify: "Netlify", firebase: "Firebase", "github-pages": "GitHub Pages", "gh-pages": "gh-pages npm", surge: "Surge", "aws-s3": "AWS S3" };
   HOST_IDS.forEach((id, i) => {
     const b = document.createElement("button");
     b.type = "button";
     b.dataset.host = id;
-    b.style.setProperty("--tilt", `${[-3, 2, -1.5, 3, -2.5, 1.5, -2, 2.5][i]}deg`);
+    b.style.setProperty("--tilt", `${[-3, 2, -1.5, 3, -2.5, 1.5, -2, 2.5, -1][i]}deg`);
     b.textContent = short[id];
     b.title = HOSTS[id].name + " — " + HOSTS[id].skips;
     b.addEventListener("click", () => { if (!state.busy && id !== state.host) run(id); });

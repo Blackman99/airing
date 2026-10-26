@@ -38,6 +38,7 @@
     "netlify",
     "firebase-hosting",
     "github-pages",
+    "aws-s3",
     "dotenv",
     "env",
     "secrets",

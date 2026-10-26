@@ -71,6 +71,13 @@ export const HOSTS: Record<HostId, HostInfo> = {
     skips: ".git, every dotfile and dot-directory, *.*~, node_modules, bower_components + .surgeignore (which can un-ignore with !)",
     source: "https://github.com/sintaxi/surge-sdk/blob/master/stream/lib/stream.js",
   },
+  "aws-s3": {
+    id: "aws-s3",
+    name: "AWS S3 (aws s3 sync)",
+    command: "aws s3 sync <dir> s3://<bucket>",
+    skips: "nothing — .env, .git and every dotfile go up unless an --exclude matches (fnmatch on the path, * crosses /, the last matching --exclude/--include wins)",
+    source: "https://github.com/aws/aws-cli/blob/develop/awscli/customizations/s3/filters.py",
+  },
 };
 
 export const HOST_IDS = Object.keys(HOSTS) as HostId[];
@@ -241,6 +248,91 @@ function surge(input: HostFilterInput): Filter {
   };
 }
 
+// --- AWS S3: aws s3 sync <dir> s3://bucket  (and aws s3 cp|mv <dir> s3://bucket --recursive) ---
+// awscli/customizations/s3/filegenerator.py walks every file under the source dir: no built-in ignore
+// list, dotfiles and .git included, symlinks followed. awscli/customizations/s3/filters.py then, for
+// each file, runs every --exclude/--include in command-line order: the pattern is joined onto the
+// source root (os.path.join(rootdir, pattern)) and fnmatch-ed against the file's full path; a match
+// sets exclude→skip / include→upload, so the LAST matching filter wins and unmatched files go up.
+// Consequences we model exactly: fnmatch "*" crosses "/" (".*" catches .git/config, but not
+// sub/.env), and "./.env" never matches anything (the "./" stays in the joined pattern).
+// Whether a bucket is public is bucket policy, not the CLI; airing assumes the bucket is the site.
+export function fnmatchRegExp(pat: string): RegExp {
+  // port of CPython Lib/fnmatch.py _translate() (3.13), emitting a JS RegExp
+  const toks: string[] = [];
+  const STAR = "[\\s\\S]*";
+  const cls = (s: string) => s.replace(/[\\\]\[^-]/g, "\\$&");
+  let i = 0;
+  const n = pat.length;
+  while (i < n) {
+    const c = pat[i++];
+    if (c === "*") {
+      if (toks[toks.length - 1] !== STAR) toks.push(STAR);
+    } else if (c === "?") toks.push("[\\s\\S]");
+    else if (c === "[") {
+      let j = i;
+      if (j < n && pat[j] === "!") j++;
+      if (j < n && pat[j] === "]") j++;
+      while (j < n && pat[j] !== "]") j++;
+      if (j >= n) {
+        toks.push("\\[");
+        continue;
+      }
+      let chunks: string[];
+      if (!pat.slice(i, j).includes("-")) chunks = [pat.slice(i, j)];
+      else {
+        chunks = [];
+        let a = i;
+        let k = pat[a] === "!" ? a + 2 : a + 1;
+        for (;;) {
+          k = pat.indexOf("-", k);
+          if (k < 0 || k >= j) break;
+          chunks.push(pat.slice(a, k));
+          a = k + 1;
+          k = k + 3;
+        }
+        const chunk = pat.slice(a, j);
+        if (chunk) chunks.push(chunk);
+        else chunks[chunks.length - 1] += "-";
+        // remove empty ranges (z-a)
+        for (let m = chunks.length - 1; m > 0; m--) {
+          if (chunks[m - 1][chunks[m - 1].length - 1] > chunks[m][0]) {
+            chunks[m - 1] = chunks[m - 1].slice(0, -1) + chunks[m].slice(1);
+            chunks.splice(m, 1);
+          }
+        }
+      }
+      i = j + 1;
+      const raw = chunks.join("-");
+      if (!raw) toks.push("(?!)");
+      else if (raw === "!") toks.push("[\\s\\S]");
+      else {
+        const neg = raw[0] === "!";
+        if (neg) chunks[0] = chunks[0].slice(1);
+        toks.push(`[${neg ? "^" : ""}${chunks.map(cls).join("-")}]`);
+      }
+    } else toks.push(c.replace(/[\\^$.*+?()[\]{}|/-]/g, "\\$&"));
+  }
+  return new RegExp(`^(?:${toks.join("")})$`);
+}
+
+function awsS3(input: HostFilterInput): Filter {
+  // os.path.join(root, "/abs") drops the root; such a pattern is matched against the absolute path,
+  // which only a leading "*" can bridge — so match the part after "/" against "<anything>/rel".
+  const filters = (input.opts.s3Filters ?? []).map((f) => ({ ...f, re: fnmatchRegExp(f.pattern.startsWith("/") ? f.pattern : "/" + f.pattern) }));
+  return (path) => {
+    let keep = true;
+    let why = "";
+    for (const f of filters) {
+      if (f.re.test((f.pattern.startsWith("/") ? "/\u0000root/" : "/") + path)) {
+        keep = f.type === "include";
+        why = `--${f.type} "${f.pattern}"`;
+      }
+    }
+    return keep ? { fate: "public" } : { fate: "home", why };
+  };
+}
+
 export function hostFilter(host: HostId, input: HostFilterInput, ctx: { hasCargo?: boolean } = {}): Filter {
   switch (host) {
     case "cf-pages":
@@ -259,5 +351,7 @@ export function hostFilter(host: HostId, input: HostFilterInput, ctx: { hasCargo
       return ghPages(input);
     case "surge":
       return surge(input);
+    case "aws-s3":
+      return awsS3(input);
   }
 }

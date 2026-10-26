@@ -11,7 +11,7 @@ export const TOOLS = [
   {
     name: "scan_deploy",
     description:
-      "Before running a deploy command (wrangler pages deploy, wrangler deploy with assets, vercel, netlify deploy, firebase deploy, actions/upload-pages-artifact, gh-pages, surge), resolve exactly which files that host would upload from a directory using the host's own ignore rules, and report anything secret that would become public: .env / .dev.vars files with secret-looking variables, .git/, private keys, cloud credential files, database dumps, source maps with original source, provider API keys baked into bundles. Secret values are never returned (names, shapes and sha256 fingerprints only). With no host and no deploy config, checks every host. Read-only: never uploads, deploys or edits.",
+      "Before running a deploy command (wrangler pages deploy, wrangler deploy with assets, vercel, netlify deploy, firebase deploy, actions/upload-pages-artifact, gh-pages, surge, aws s3 sync / cp --recursive), resolve exactly which files that host would upload from a directory using the host's own ignore rules, and report anything secret that would become public: .env / .dev.vars files with secret-looking variables, .git/, private keys, cloud credential files, database dumps, source maps with original source, provider API keys baked into bundles. Secret values are never returned (names, shapes and sha256 fingerprints only). With no host and no deploy config, checks every host. Read-only: never uploads, deploys or edits.",
     inputSchema: {
       type: "object",
       properties: {
@@ -78,7 +78,7 @@ export async function runMcp(): Promise<void> {
         protocolVersion: params?.protocolVersion ?? "2025-06-18",
         capabilities: { tools: {} },
         serverInfo: { name: "airing", version: VERSION },
-        instructions: "Call scan_deploy on the project before running any deploy command (wrangler, vercel, netlify, firebase, gh-pages, surge). If it reports LEAK, do not deploy; fix the upload set first. After a deploy, probe_url checks the live site. All tools are read-only.",
+        instructions: "Call scan_deploy on the project before running any deploy command (wrangler, vercel, netlify, firebase, gh-pages, surge, aws s3 sync). If it reports LEAK, do not deploy; fix the upload set first. After a deploy, probe_url checks the live site. All tools are read-only.",
       });
     } else if (method === "ping") reply({});
     else if (method === "tools/list") reply({ tools: TOOLS });

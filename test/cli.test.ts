@@ -34,7 +34,7 @@ test("--json carries no secret values", () => {
   const r = run([root, "--json", "--all"]);
   const j = JSON.parse(r.out);
   assert.equal(j.tool, "airing");
-  assert.equal(j.deployments.length, 8);
+  assert.equal(j.deployments.length, 9);
   for (const v of [google, openai, stripe, "hunter2"]) assert.ok(!r.out.includes(v));
 });
 

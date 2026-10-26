@@ -11,7 +11,7 @@ inputs:
     required: false
     default: "."
   host:
-    description: "cf-pages, cf-workers, vercel, netlify, firebase, github-pages, gh-pages or surge. Empty: read it from the project's config (or check every host)"
+    description: "cf-pages, cf-workers, vercel, netlify, firebase, github-pages, gh-pages, surge or aws-s3. Empty: read it from the project's config (or check every host)"
     required: false
     default: ""
   dir:

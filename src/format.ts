@@ -118,7 +118,7 @@ function verdict(st: Style, r: ScanReport, o: FormatOpts = {}): string {
   return st.ok("✓ clean: nothing secret in the upload set.") + st.dim(" airing only reads; nothing was uploaded.");
 }
 
-const SHORT: Record<string, string> = { "cf-pages": "CF Pages", "cf-workers": "CF Workers", vercel: "Vercel", netlify: "Netlify", firebase: "Firebase", "github-pages": "GH Pages", "gh-pages": "gh-pages", surge: "Surge" };
+const SHORT: Record<string, string> = { "cf-pages": "CF Pages", "cf-workers": "Workers", vercel: "Vercel", netlify: "Netlify", firebase: "Firebase", "github-pages": "GH Pages", "gh-pages": "gh-pages", surge: "Surge", "aws-s3": "S3" };
 
 function matrixRows(r: ScanReport) {
   const rows = new Map<string, { label: string; secretish: boolean; cells: Map<string, { sev?: Severity; home?: boolean }> }>();
@@ -155,6 +155,8 @@ export function fitLabel(label: string, max: number): string {
   return room > 4 ? short + tag : label.slice(0, max - 1) + "…";
 }
 
+const COL = 9;
+
 function matrixText(st: Style, r: ScanReport, _o: FormatOpts): string[] {
   const out: string[] = [];
   const dir = r.deployments[0]?.deployment.dir ?? ".";
@@ -165,16 +167,16 @@ function matrixText(st: Style, r: ScanReport, _o: FormatOpts): string[] {
     out.push(st.ok("  every host: nothing secret in this folder."));
     return out;
   }
-  // 8 host columns of 11: keep the label column narrow enough that the matrix fits 120 columns
+  // 9 host columns of 9 (labels ≤ 8 chars, cells ≤ 6): with a 36-char label column the matrix fits 120 columns
   const w = Math.min(34, Math.max(...rows.map((x) => x.label.length), 10)) + 2;
-  out.push(("  " + pad("", w) + r.deployments.map((d, i, all) => st.dim(i === all.length - 1 ? SHORT[d.deployment.host] : pad(SHORT[d.deployment.host], 11))).join("")).trimEnd());
+  out.push(("  " + pad("", w) + r.deployments.map((d, i, all) => st.dim(i === all.length - 1 ? SHORT[d.deployment.host] : pad(SHORT[d.deployment.host], COL))).join("")).trimEnd());
   for (const row of rows) {
     const cells = r.deployments.map((d) => {
       const c = row.cells.get(d.deployment.host);
       const uploadOnly = d.deployment.host === "vercel" && d.deployment.opts.vercelStatic === false && row.secretish;
       const txt = !c || c.home ? "home" : uploadOnly ? "upload" : c.sev === "LEAK" ? "PUBLIC" : "risk";
       const styled = txt === "PUBLIC" ? st.leak(txt) : txt === "home" ? st.ok(txt) : st.risk(txt);
-      return styled + " ".repeat(Math.max(0, 11 - txt.length));
+      return styled + " ".repeat(Math.max(0, COL - txt.length));
     });
     out.push(("  " + st.path(pad(fitLabel(row.label, w - 2), w)) + cells.join("")).trimEnd());
   }

@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { tmpdir } from "node:os";
 import { buildFileTree } from "@vercel/client";
 import { globSync } from "glob";
 import { glob as tinyglob } from "tinyglobby";
@@ -154,4 +155,73 @@ test("surge: same set as surge-stream getFiles (surge-ignore defaults + .surgeig
     assert.deepEqual(ours(root, "surge", { opts: {}, surgeignore }), upstream, JSON.stringify(surgeignore));
     if (!surgeignore) assert.ok(!upstream.includes(".env") && !upstream.some((p) => p.startsWith(".git/")) && upstream.includes("backup.sql") && !upstream.includes("notes.txt~"));
   }
+});
+
+// --- AWS S3 -----------------------------------------------------------------------------------
+const S3_FILTER_SETS: { name: string; f: [("exclude" | "include"), string][] }[] = [
+  { name: "no filters (everything goes)", f: [] },
+  { name: "the common wrong fix: .*", f: [["exclude", ".*"]] },
+  { name: "./ never matches", f: [["exclude", "./.env"], ["exclude", "./backup.sql"]] },
+  { name: "last match wins", f: [["exclude", ".*"], ["include", ".well-known/*"], ["include", ".env"], ["exclude", ".env"]] },
+  { name: "allow-list", f: [["exclude", "*"], ["include", "*.html"], ["include", "dist/*"], ["exclude", "*.map"]] },
+  { name: "sets and ?", f: [["exclude", "[.]git/*"], ["exclude", "*/[!a-m]*/*.js"], ["exclude", "?env*"], ["exclude", "backup.sq[a-z]"]] },
+  { name: "deep dotfiles", f: [["exclude", ".env*"], ["exclude", "*/.env*"], ["exclude", ".git/*"], ["exclude", "*/.git/*"], ["exclude", "node_modules/*"]] },
+];
+
+/** The real aws CLI, `aws s3 sync --dryrun`, against a stub S3 endpoint that lists an empty bucket. */
+test("aws-s3: same set as the real aws CLI (aws s3 sync --dryrun against an empty stub bucket)", async (t) => {
+  const { execFile } = await import("node:child_process");
+  const { createServer } = await import("node:http");
+  const bin = process.env.AIRING_AWS || "aws";
+  const run = (args: string[], env: NodeJS.ProcessEnv) =>
+    new Promise<string>((res, rej) => execFile(bin, args, { env, encoding: "utf8", maxBuffer: 1 << 24, shell: process.platform === "win32" }, (e, out, err) => (e ? rej(new Error(err || e.message)) : res(out))));
+  const env: NodeJS.ProcessEnv = { ...process.env, AWS_ACCESS_KEY_ID: "AKIDEXAMPLE", AWS_SECRET_ACCESS_KEY: "stub", AWS_DEFAULT_REGION: "us-east-1", AWS_REGION: "us-east-1", AWS_EC2_METADATA_DISABLED: "true", AWS_PAGER: "", AWS_CONFIG_FILE: join(tmpdir(), "airing-no-aws-config"), AWS_SHARED_CREDENTIALS_FILE: join(tmpdir(), "airing-no-aws-creds") };
+  try {
+    await run(["--version"], env);
+  } catch {
+    if (process.env.GITHUB_ACTIONS) throw new Error("the aws CLI is preinstalled on GitHub-hosted runners — the cross-check must run there");
+    t.skip("aws CLI not installed (set AIRING_AWS=/path/to/aws)");
+    return;
+  }
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "application/xml" });
+    res.end('<?xml version="1.0" encoding="UTF-8"?><ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>b</Name><Prefix></Prefix><KeyCount>0</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated></ListBucketResult>');
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as { port: number }).port;
+  try {
+    const { root } = vibeApp({ ...extra, "dist/.env": "A=1", "dist/.git/config": "[core]", "dist/assets/vendor/x.js": "x", "env.txt": "x", "xenv": "x", "backup.sqx": "x" });
+    for (const set of S3_FILTER_SETS) {
+      const flags = set.f.flatMap(([k, p]) => [`--${k}`, p]);
+      const out = await run(["s3", "sync", root, "s3://b", "--dryrun", "--no-progress", "--endpoint-url", `http://127.0.0.1:${port}`, ...flags], env);
+      const upstream = out.split(/\r?\n/).map((l) => /\(dryrun\) upload: .* to s3:\/\/b\/(.+)$/.exec(l)?.[1]).filter((x): x is string => !!x).sort();
+      assert.ok(upstream.length > 0, set.name + ": aws uploaded nothing?\n" + out);
+      assert.deepEqual(ours(root, "aws-s3", { opts: { s3Filters: set.f.map(([type, pattern]) => ({ type, pattern })) } }), upstream, set.name);
+      if (!set.f.length) assert.ok(upstream.includes(".env") && upstream.includes(".git/config") && upstream.includes("node_modules/left-pad/index.js"), "aws s3 sync has no built-in ignores");
+      if (set.name.startsWith("the common")) assert.ok(!upstream.includes(".env") && upstream.includes("dist/.env"), ".* does not reach into sub-directories");
+    }
+  } finally {
+    server.close();
+  }
+});
+
+/** Our fnmatch port against CPython's own fnmatch.fnmatchcase (what aws-cli calls on POSIX). */
+test("aws-s3: fnmatch port matches CPython fnmatch on tricky patterns", async (t) => {
+  const { fnmatchRegExp } = await import("../src/hosts.js");
+  const pats = ["*", ".*", "*.map", "*/.env*", "?env", "[.]git/*", "[!a-m]*", "[]]x", "[!]]x", "[z-a]x", "[!z-a]x", "[a-]x", "[-a]x", "[a-c-e]x", "*[", "a[b", "[\\]x", "[^a]x", "[[]x", "a**b", "dist/*.js", "*/*/*.js", "[a-c][!x-z]?", "(a|b)", "a+b", "a.b", "$x^", "{a,b}", "[&&]x", "[~~]x", "[a&&b]x", "--x", "[!-]x"];
+  const strs = ["", "a", ".env", ".git/config", "dist/.env", "dist/a.js", "dist/assets/a.js", "a.map", "x/y.map", "]x", "!x", "-x", "ax", "bx", "dx", "ex", "fx", "zx", "\\x", "^x", "[x", "ab", "aXb", "a/b", "a/x/b", "a[b", "abc", "cay", "(a|b)", "a+b", "a.b", "aab", "$x^", "{a,b}", "&x", "~x", "--x", "a/.env.local", "env", "xenv", ".env\nx"];
+  let py = "";
+  for (const exe of ["python3", "python"]) {
+    try {
+      py = execFileSync(exe, ["-c", "import fnmatch,json,sys;d=json.load(sys.stdin);print(json.dumps([[fnmatch.fnmatchcase(s,p) for s in d['s']] for p in d['p']]))"], { input: JSON.stringify({ p: pats, s: strs }), encoding: "utf8" });
+      break;
+    } catch {}
+  }
+  if (!py) {
+    if (process.env.GITHUB_ACTIONS) throw new Error("python is preinstalled on GitHub-hosted runners — the cross-check must run there");
+    t.skip("python not installed");
+    return;
+  }
+  const want: boolean[][] = JSON.parse(py);
+  pats.forEach((p, i) => strs.forEach((s, j) => assert.equal(fnmatchRegExp(p).test(s), want[i][j], `fnmatch(${JSON.stringify(s)}, ${JSON.stringify(p)})`)));
 });

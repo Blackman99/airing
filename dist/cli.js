@@ -2802,6 +2802,13 @@ var HOSTS = {
     command: "surge <dir> <domain>",
     skips: ".git, every dotfile and dot-directory, *.*~, node_modules, bower_components + .surgeignore (which can un-ignore with !)",
     source: "https://github.com/sintaxi/surge-sdk/blob/master/stream/lib/stream.js"
+  },
+  "aws-s3": {
+    id: "aws-s3",
+    name: "AWS S3 (aws s3 sync)",
+    command: "aws s3 sync <dir> s3://<bucket>",
+    skips: "nothing \u2014 .env, .git and every dotfile go up unless an --exclude matches (fnmatch on the path, * crosses /, the last matching --exclude/--include wins)",
+    source: "https://github.com/aws/aws-cli/blob/develop/awscli/customizations/s3/filters.py"
   }
 };
 var HOST_IDS = Object.keys(HOSTS);
@@ -2948,6 +2955,76 @@ function surge(input) {
     return { fate: "public" };
   };
 }
+function fnmatchRegExp(pat) {
+  const toks = [];
+  const STAR = "[\\s\\S]*";
+  const cls = (s) => s.replace(/[\\\]\[^-]/g, "\\$&");
+  let i = 0;
+  const n = pat.length;
+  while (i < n) {
+    const c = pat[i++];
+    if (c === "*") {
+      if (toks[toks.length - 1] !== STAR) toks.push(STAR);
+    } else if (c === "?") toks.push("[\\s\\S]");
+    else if (c === "[") {
+      let j = i;
+      if (j < n && pat[j] === "!") j++;
+      if (j < n && pat[j] === "]") j++;
+      while (j < n && pat[j] !== "]") j++;
+      if (j >= n) {
+        toks.push("\\[");
+        continue;
+      }
+      let chunks;
+      if (!pat.slice(i, j).includes("-")) chunks = [pat.slice(i, j)];
+      else {
+        chunks = [];
+        let a = i;
+        let k = pat[a] === "!" ? a + 2 : a + 1;
+        for (; ; ) {
+          k = pat.indexOf("-", k);
+          if (k < 0 || k >= j) break;
+          chunks.push(pat.slice(a, k));
+          a = k + 1;
+          k = k + 3;
+        }
+        const chunk = pat.slice(a, j);
+        if (chunk) chunks.push(chunk);
+        else chunks[chunks.length - 1] += "-";
+        for (let m = chunks.length - 1; m > 0; m--) {
+          if (chunks[m - 1][chunks[m - 1].length - 1] > chunks[m][0]) {
+            chunks[m - 1] = chunks[m - 1].slice(0, -1) + chunks[m].slice(1);
+            chunks.splice(m, 1);
+          }
+        }
+      }
+      i = j + 1;
+      const raw = chunks.join("-");
+      if (!raw) toks.push("(?!)");
+      else if (raw === "!") toks.push("[\\s\\S]");
+      else {
+        const neg = raw[0] === "!";
+        if (neg) chunks[0] = chunks[0].slice(1);
+        toks.push(`[${neg ? "^" : ""}${chunks.map(cls).join("-")}]`);
+      }
+    } else toks.push(c.replace(/[\\^$.*+?()[\]{}|/-]/g, "\\$&"));
+  }
+  return new RegExp(`^(?:${toks.join("")})$`);
+}
+function awsS3(input) {
+  const filters = (input.opts.s3Filters ?? []).map((f2) => ({ ...f2, re: fnmatchRegExp(f2.pattern.startsWith("/") ? f2.pattern : "/" + f2.pattern) }));
+  return (path2) => {
+    let keep = true;
+    let why = "";
+    for (const f2 of filters) {
+      if (f2.re.test((f2.pattern.startsWith("/") ? "/\0root/" : "/") + path2)) {
+        keep = f2.type === "include";
+        why = `--${f2.type} "${f2.pattern}"`;
+      }
+    }
+    return keep ? { fate: "public" } : { fate: "home", why };
+  };
+}
 function hostFilter(host, input, ctx = {}) {
   switch (host) {
     case "cf-pages":
@@ -2966,6 +3043,8 @@ function hostFilter(host, input, ctx = {}) {
       return ghPages(input);
     case "surge":
       return surge(input);
+    case "aws-s3":
+      return awsS3(input);
   }
 }
 
@@ -3061,7 +3140,7 @@ function verdict(st, r, o = {}) {
   if (risks) return st.risk(`! no secrets, ${risks} risk${risks === 1 ? "" : "s"} worth a look.`) + st.dim(" exit 0 (use --fail-on risk to block)");
   return st.ok("\u2713 clean: nothing secret in the upload set.") + st.dim(" airing only reads; nothing was uploaded.");
 }
-var SHORT = { "cf-pages": "CF Pages", "cf-workers": "CF Workers", vercel: "Vercel", netlify: "Netlify", firebase: "Firebase", "github-pages": "GH Pages", "gh-pages": "gh-pages", surge: "Surge" };
+var SHORT = { "cf-pages": "CF Pages", "cf-workers": "Workers", vercel: "Vercel", netlify: "Netlify", firebase: "Firebase", "github-pages": "GH Pages", "gh-pages": "gh-pages", surge: "Surge", "aws-s3": "S3" };
 function matrixRows(r) {
   const rows = /* @__PURE__ */ new Map();
   for (const d of r.deployments) {
@@ -3094,6 +3173,7 @@ function fitLabel(label, max) {
   const short = head && head.length + 1 + tail.length <= room ? head + "\u2026" + tail : "\u2026" + path2.slice(-(room - 1));
   return room > 4 ? short + tag : label.slice(0, max - 1) + "\u2026";
 }
+var COL = 9;
 function matrixText(st, r, _o) {
   const out = [];
   const dir = r.deployments[0]?.deployment.dir ?? ".";
@@ -3105,14 +3185,14 @@ function matrixText(st, r, _o) {
     return out;
   }
   const w = Math.min(34, Math.max(...rows.map((x) => x.label.length), 10)) + 2;
-  out.push(("  " + pad("", w) + r.deployments.map((d, i, all) => st.dim(i === all.length - 1 ? SHORT[d.deployment.host] : pad(SHORT[d.deployment.host], 11))).join("")).trimEnd());
+  out.push(("  " + pad("", w) + r.deployments.map((d, i, all) => st.dim(i === all.length - 1 ? SHORT[d.deployment.host] : pad(SHORT[d.deployment.host], COL))).join("")).trimEnd());
   for (const row of rows) {
     const cells = r.deployments.map((d) => {
       const c = row.cells.get(d.deployment.host);
       const uploadOnly = d.deployment.host === "vercel" && d.deployment.opts.vercelStatic === false && row.secretish;
       const txt = !c || c.home ? "home" : uploadOnly ? "upload" : c.sev === "LEAK" ? "PUBLIC" : "risk";
       const styled = txt === "PUBLIC" ? st.leak(txt) : txt === "home" ? st.ok(txt) : st.risk(txt);
-      return styled + " ".repeat(Math.max(0, 11 - txt.length));
+      return styled + " ".repeat(Math.max(0, COL - txt.length));
     });
     out.push(("  " + st.path(pad(fitLabel(row.label, w - 2), w)) + cells.join("")).trimEnd());
   }
@@ -4460,6 +4540,12 @@ async function detectDeployments(tree) {
       add({ ...d, source: `package.json scripts.${name}` });
     }
   }
+  const scriptDeploys = (path2, text) => {
+    for (const d of deploymentsFromScript(text, ["aws-s3"])) {
+      if (/[$`%]/.test(d.dir)) notes.push(`${path2}: aws s3 upload from "${d.dir}" \u2014 a variable, so not checked; run airing --host aws-s3 --dir <that dir>`);
+      else add({ ...d, source: path2 });
+    }
+  };
   for (const f2 of tree.files) {
     if (!/^\.github\/workflows\/[^/]+\.ya?ml$/.test(f2.path)) continue;
     const y = await tree.readText(f2.path, 512 * 1024) ?? "";
@@ -4473,6 +4559,11 @@ async function detectDeployments(tree) {
       const wa = /uses:\s*cloudflare\/wrangler-action@[\s\S]*?command:\s*["']?([^\n"']+)/.exec(blk);
       if (wa) for (const d of deploymentsFromCommand("wrangler " + wa[1])) add({ ...d, source: `${f2.path} wrangler-action` });
     }
+    scriptDeploys(f2.path, y);
+  }
+  for (const f2 of tree.files) {
+    if (!/^(?:(?:scripts?|bin|deploy)\/)?(?:[^/]+\.(?:sh|bash)|Makefile|makefile|GNUmakefile)$/.test(f2.path)) continue;
+    scriptDeploys(f2.path, await tree.readText(f2.path, 512 * 1024) ?? "");
   }
   return { deployments: out, notes, hasBuildScript: typeof scripts.build === "string" };
 }
@@ -4528,6 +4619,9 @@ function deploymentsFromCommand(line) {
     } else if (bin === "surge") {
       const dir = surgeProject(rest);
       if (dir !== void 0) out.push({ host: "surge", dir: norm(dir), source: "command", opts: {} });
+    } else if (bin === "aws") {
+      const d = awsS3Upload(rest);
+      if (d) out.push(d);
     }
   }
   return out;
@@ -4555,7 +4649,63 @@ function surgeProject(rest) {
   if (pos[0]) return project ?? pos[0];
   return project ?? (intent || !pos.length ? "." : void 0);
 }
-var HOST_ORDER = ["cf-pages", "cf-workers", "vercel", "netlify", "firebase", "github-pages", "gh-pages", "surge"];
+var AWS_BOOL = /* @__PURE__ */ new Set([
+  "--debug",
+  "--no-verify-ssl",
+  "--no-paginate",
+  "--no-sign-request",
+  "--no-cli-pager",
+  "--cli-auto-prompt",
+  "--no-cli-auto-prompt",
+  "--dryrun",
+  "--quiet",
+  "--follow-symlinks",
+  "--no-follow-symlinks",
+  "--no-guess-mime-type",
+  "--only-show-errors",
+  "--no-progress",
+  "--delete",
+  "--exact-timestamps",
+  "--size-only",
+  "--recursive",
+  "--force-glacier-transfer",
+  "--ignore-glacier-warnings",
+  "--no-overwrite",
+  "--help"
+]);
+function awsS3Upload(rest) {
+  const pos = [];
+  const filters = [];
+  let recursive = false;
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    const eq = /^(--[a-z0-9-]+)=(.*)$/.exec(a);
+    const flag = eq ? eq[1] : a;
+    if (!flag.startsWith("--")) {
+      pos.push(a);
+      continue;
+    }
+    if (flag === "--recursive") recursive = true;
+    if (AWS_BOOL.has(flag)) continue;
+    const value = eq ? eq[2] : flag === "--request-payer" && rest[i + 1] !== "requester" ? void 0 : rest[++i];
+    if ((flag === "--exclude" || flag === "--include") && value !== void 0) filters.push({ type: flag === "--exclude" ? "exclude" : "include", pattern: value });
+  }
+  if (rest.includes("--help") || pos[0] !== "s3" || !["sync", "cp", "mv"].includes(pos[1])) return void 0;
+  const [, verb, src, dst] = pos;
+  if (!src || !dst || /^s3:\/\//i.test(src) || !/^s3:\/\//i.test(dst)) return void 0;
+  if (verb !== "sync" && !recursive) return void 0;
+  return { host: "aws-s3", dir: norm(src), source: "command", opts: filters.length ? { s3Filters: filters } : {} };
+}
+function deploymentsFromScript(text, only) {
+  const out = [];
+  for (const raw of text.replace(/\\\r?\n\s*/g, " ").split(/\r?\n/)) {
+    const line = raw.replace(/^\s*(?:-\s+)?(?:run:\s*[|>]?[-+]?\s*)?/, "").replace(/\s#.*$/, "").replace(/^[@-]+(?=[\w.])/, "").replace(/\$\{\{\s*(.*?)\s*\}\}/g, (_, x) => "${{" + x.replace(/\s+/g, "") + "}}");
+    if (!line || line.startsWith("#")) continue;
+    for (const d of deploymentsFromCommand(line)) if (!only || only.includes(d.host)) out.push(d);
+  }
+  return out;
+}
+var HOST_ORDER = ["cf-pages", "cf-workers", "vercel", "netlify", "firebase", "github-pages", "gh-pages", "surge", "aws-s3"];
 
 // src/scan.ts
 var RANK = { LEAK: 3, RISK: 2, INFO: 1 };
@@ -4583,7 +4733,21 @@ function fixFor(host, path2, rule, dirLabel) {
       return `remove it from ${dirLabel}, or drop --dotfiles`;
     case "surge":
       return `add "${pat}" to ${dirLabel === "." ? "" : dirLabel + "/"}.surgeignore (and drop any !${pat} line there)`;
+    case "aws-s3":
+      return `append ${s3Excludes(rule, path2).map((p) => `--exclude "${p}"`).join(" ")} to the aws s3 command, after any --include (the last matching filter wins)`;
   }
+}
+function s3Excludes(rule, path2) {
+  const p = path2.replace(/\/$/, "");
+  if (rule === "git-dir") return [p + "/*"];
+  if (rule === "env-file") return p.endsWith(".dev.vars") ? ["*.dev.vars"] : [".env*", "*/.env*"];
+  if (rule === "source-map" || p.endsWith(".map")) return ["*.map"];
+  if (rule === "agent-config") {
+    const s = p.split("/");
+    const i = s.findIndex((x) => x.startsWith("."));
+    return [s.slice(0, i + 1).join("/") + "/*"];
+  }
+  return [p];
 }
 async function mapLimit(items, n, fn) {
   const out = new Array(items.length);
@@ -4606,7 +4770,8 @@ var SERVER_SIDE = {
   firebase: "a Cloud Function, key in Secret Manager",
   "github-pages": "a serverless function on another host \u2014 GitHub Pages is static only",
   "gh-pages": "a serverless function on another host \u2014 GitHub Pages is static only",
-  surge: "a serverless function on another host \u2014 Surge is static only"
+  surge: "a serverless function on another host \u2014 Surge is static only",
+  "aws-s3": "a Lambda function URL or API Gateway, key in Secrets Manager \u2014 an S3 bucket is static only"
 };
 var BUILD_DIRS = ["dist", "build", "out", "public", "_site", ".output/public", "www"];
 function remedyFor(tree, d, findings) {
@@ -4626,11 +4791,13 @@ function remedyFor(tree, d, findings) {
   const line = (f2) => f2.rule === "source-map" || f2.path.endsWith(".map") ? "*.map" : !patterns ? f2.rule === "agent-config" ? agentDir(f2.path) + "/" : f2.path : f2.rule === "git-dir" ? ".git" : f2.rule === "env-file" ? f2.path.endsWith(".dev.vars") ? ".dev.vars" : ".env*" : f2.rule === "agent-config" ? agentDir(f2.path) : f2.path.replace(/\/$/, "");
   const lines = [...new Set(ignorable.map(line))];
   if (lines.includes("*.map")) notes.push("source maps: build with sourcemap: 'hidden' (Vite: build.sourcemap) so .map files never reach the output at all.");
+  const dotSlash = d.host === "aws-s3" ? (d.opts.s3Filters ?? []).filter((f2) => /^\.\.?\//.test(f2.pattern)) : [];
+  if (dotSlash.length) notes.unshift(`${dotSlash.map((f2) => `--${f2.type} "${f2.pattern}"`).join(", ")} match${dotSlash.length === 1 ? "es" : ""} nothing: aws-cli joins the pattern onto the source dir as written, so the "./" never matches \u2014 drop it.`);
   const atRoot = d.dir === "." && tree.files.some((f2) => f2.path === "package.json");
   const build = atRoot ? BUILD_DIRS.find((b) => tree.files.some((f2) => f2.path.startsWith(b + "/") && /\.html?$/.test(f2.path))) : void 0;
   const r = (say, extra = {}) => ({ say, lines: lines.length ? lines : void 0, notes: notes.length ? notes : void 0, ...extra });
-  if (build && ["cf-pages", "netlify", "gh-pages", "firebase", "github-pages", "surge"].includes(d.host)) {
-    const cmd = { "cf-pages": `wrangler pages deploy ${build}`, netlify: `netlify deploy --dir ${build}`, "gh-pages": `gh-pages -d ${build}`, firebase: `set "public": "${build}" in firebase.json`, "github-pages": `path: ${build}`, surge: `surge ${build} <domain>` }[d.host];
+  if (build && ["cf-pages", "netlify", "gh-pages", "firebase", "github-pages", "surge", "aws-s3"].includes(d.host)) {
+    const cmd = { "cf-pages": `wrangler pages deploy ${build}`, netlify: `netlify deploy --dir ${build}`, "gh-pages": `gh-pages -d ${build}`, firebase: `set "public": "${build}" in firebase.json`, "github-pages": `path: ${build}`, surge: `surge ${build} <domain>`, "aws-s3": `aws s3 sync ${build} s3://<bucket>` }[d.host];
     return r(`you are deploying the project root \u2014 deploy the build output instead: ${cmd}`, { lines: void 0 });
   }
   if (!lines.length) return r("");
@@ -4651,6 +4818,10 @@ function remedyFor(tree, d, findings) {
       return r(d.opts.ghPagesDotfiles ? "drop --dotfiles, or move these out" : `move these out of ${dir || "the folder you pass to gh-pages -d"}`);
     case "surge":
       return r(`add to ${dir}.surgeignore (and delete any "!" line there that re-includes them)`, { file: `${dir}.surgeignore` });
+    case "aws-s3": {
+      const ex = [...new Set(ignorable.flatMap((f2) => s3Excludes(f2.rule, f2.path)))].map((p) => `--exclude "${p}"`);
+      return r("append to the aws s3 command, after any --include (the last matching filter wins)", { lines: ex, notes: notes.length ? notes : void 0 });
+    }
   }
 }
 async function scanDeployment(tree, d) {
@@ -4714,7 +4885,7 @@ async function scanDeployment(tree, d) {
       path: key + "/",
       size: g.size,
       title: "git repository",
-      detail: `${g.files} files: full source and history \u2014 tools like git-dumper rebuild the repo from /${key}/${cred ? "; remote URL embeds a token" : ""}`,
+      detail: `${g.files} file${g.files === 1 ? "" : "s"}: full source and history \u2014 tools like git-dumper rebuild the repo from /${key}/${cred ? "; remote URL embeds a token" : ""}`,
       secrets: cred ? [{ name: "remote URL credentials", provider: /github/.test(cfg) ? "GitHub" : "git host", fingerprint: fingerprint(cred[2]), rotate: /github/.test(cfg) ? "https://github.com/settings/tokens" : void 0, shape: `${cred[2].slice(0, 4)}\u2026(${cred[2].length} chars)` }] : [],
       fix: ""
     });
@@ -5096,7 +5267,7 @@ function parseDeployLine(line, cwd) {
 var TOOLS = [
   {
     name: "scan_deploy",
-    description: "Before running a deploy command (wrangler pages deploy, wrangler deploy with assets, vercel, netlify deploy, firebase deploy, actions/upload-pages-artifact, gh-pages, surge), resolve exactly which files that host would upload from a directory using the host's own ignore rules, and report anything secret that would become public: .env / .dev.vars files with secret-looking variables, .git/, private keys, cloud credential files, database dumps, source maps with original source, provider API keys baked into bundles. Secret values are never returned (names, shapes and sha256 fingerprints only). With no host and no deploy config, checks every host. Read-only: never uploads, deploys or edits.",
+    description: "Before running a deploy command (wrangler pages deploy, wrangler deploy with assets, vercel, netlify deploy, firebase deploy, actions/upload-pages-artifact, gh-pages, surge, aws s3 sync / cp --recursive), resolve exactly which files that host would upload from a directory using the host's own ignore rules, and report anything secret that would become public: .env / .dev.vars files with secret-looking variables, .git/, private keys, cloud credential files, database dumps, source maps with original source, provider API keys baked into bundles. Secret values are never returned (names, shapes and sha256 fingerprints only). With no host and no deploy config, checks every host. Read-only: never uploads, deploys or edits.",
     inputSchema: {
       type: "object",
       properties: {
@@ -5164,7 +5335,7 @@ async function runMcp() {
         protocolVersion: params?.protocolVersion ?? "2025-06-18",
         capabilities: { tools: {} },
         serverInfo: { name: "airing", version: VERSION },
-        instructions: "Call scan_deploy on the project before running any deploy command (wrangler, vercel, netlify, firebase, gh-pages, surge). If it reports LEAK, do not deploy; fix the upload set first. After a deploy, probe_url checks the live site. All tools are read-only."
+        instructions: "Call scan_deploy on the project before running any deploy command (wrangler, vercel, netlify, firebase, gh-pages, surge, aws s3 sync). If it reports LEAK, do not deploy; fix the upload set first. After a deploy, probe_url checks the live site. All tools are read-only."
       });
     } else if (method === "ping") reply({});
     else if (method === "tools/list") reply({ tools: TOOLS });
@@ -5300,7 +5471,7 @@ async function main(argv) {
     const { cwd, deployments } = parseDeployLine(line, process.cwd());
     const fo2 = failOn(a);
     if (!deployments.length) {
-      console.error(style(a).risk(`airing: "${a.rest[0]}" is not a deploy command I know (wrangler, vercel, netlify, firebase, gh-pages, surge) \u2014 running it unchecked.`));
+      console.error(style(a).risk(`airing: "${a.rest[0]}" is not a deploy command I know (wrangler, vercel, netlify, firebase, gh-pages, surge, aws s3 sync) \u2014 running it unchecked.`));
     } else {
       const r2 = await scan(nodeTree(cwd), { deployments });
       if (failed(r2.worst, fo2)) {

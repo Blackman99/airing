@@ -1,7 +1,7 @@
 // Where does this project deploy to, and from which directory? Read from the config files the
 // deploy CLIs themselves read. Nothing here touches the network.
 import { parse as parseToml } from "smol-toml";
-import type { Deployment, HostId, Tree } from "./types.js";
+import type { Deployment, HostId, S3Filter, Tree } from "./types.js";
 
 export const norm = (p: string) => {
   const s = p.replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/\/+$/, "");
@@ -124,6 +124,16 @@ export async function detectDeployments(tree: Tree): Promise<Detected> {
     }
   }
 
+  // `aws s3 sync` lives in workflows and deploy scripts far more than in package.json. Only aws-s3 is
+  // read from free-form shell, so a workflow that merely mentions `wrangler pages deploy` in a test
+  // does not turn into a deploy target.
+  const scriptDeploys = (path: string, text: string) => {
+    for (const d of deploymentsFromScript(text, ["aws-s3"])) {
+      if (/[$`%]/.test(d.dir)) notes.push(`${path}: aws s3 upload from "${d.dir}" — a variable, so not checked; run airing --host aws-s3 --dir <that dir>`);
+      else add({ ...d, source: path });
+    }
+  };
+
   // GitHub Actions: upload-pages-artifact path / include-hidden-files, wrangler-action pages deploy
   for (const f of tree.files) {
     if (!/^\.github\/workflows\/[^/]+\.ya?ml$/.test(f.path)) continue;
@@ -138,6 +148,13 @@ export async function detectDeployments(tree: Tree): Promise<Detected> {
       const wa = /uses:\s*cloudflare\/wrangler-action@[\s\S]*?command:\s*["']?([^\n"']+)/.exec(blk);
       if (wa) for (const d of deploymentsFromCommand("wrangler " + wa[1])) add({ ...d, source: `${f.path} wrangler-action` });
     }
+    scriptDeploys(f.path, y);
+  }
+
+  // shell scripts and Makefiles at the root, in scripts/ or bin/ (deploy.sh, Makefile `deploy:` …)
+  for (const f of tree.files) {
+    if (!/^(?:(?:scripts?|bin|deploy)\/)?(?:[^/]+\.(?:sh|bash)|Makefile|makefile|GNUmakefile)$/.test(f.path)) continue;
+    scriptDeploys(f.path, (await tree.readText(f.path, 512 * 1024)) ?? "");
   }
   return { deployments: out, notes, hasBuildScript: typeof scripts.build === "string" };
 }
@@ -203,6 +220,9 @@ export function deploymentsFromCommand(line: string): Deployment[] {
     } else if (bin === "surge") {
       const dir = surgeProject(rest);
       if (dir !== undefined) out.push({ host: "surge", dir: norm(dir), source: "command", opts: {} });
+    } else if (bin === "aws") {
+      const d = awsS3Upload(rest);
+      if (d) out.push(d);
     }
   }
   return out;
@@ -236,4 +256,50 @@ function surgeProject(rest: string[]): string | undefined {
   return project ?? (intent || !pos.length ? "." : undefined);
 }
 
-export const HOST_ORDER: HostId[] = ["cf-pages", "cf-workers", "vercel", "netlify", "firebase", "github-pages", "gh-pages", "surge"];
+// aws-cli: `aws [global opts] s3 sync|cp|mv <src> <dst> [opts]` (awscli/customizations/s3/subcommands.py).
+// An upload of a directory is a local <src> and an s3:// <dst>: sync always walks a directory, cp and
+// mv only with --recursive. --exclude / --include are kept in order (filters.py: the last match wins).
+// Options without a value; every other --option takes one (aws-cli has no short flags here).
+const AWS_BOOL = new Set([
+  "--debug", "--no-verify-ssl", "--no-paginate", "--no-sign-request", "--no-cli-pager", "--cli-auto-prompt", "--no-cli-auto-prompt",
+  "--dryrun", "--quiet", "--follow-symlinks", "--no-follow-symlinks", "--no-guess-mime-type", "--only-show-errors", "--no-progress",
+  "--delete", "--exact-timestamps", "--size-only", "--recursive", "--force-glacier-transfer", "--ignore-glacier-warnings", "--no-overwrite", "--help",
+]);
+function awsS3Upload(rest: string[]): Deployment | undefined {
+  const pos: string[] = [];
+  const filters: S3Filter[] = [];
+  let recursive = false;
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    const eq = /^(--[a-z0-9-]+)=(.*)$/.exec(a);
+    const flag = eq ? eq[1] : a;
+    if (!flag.startsWith("--")) {
+      pos.push(a);
+      continue;
+    }
+    if (flag === "--recursive") recursive = true;
+    if (AWS_BOOL.has(flag)) continue;
+    // --request-payer takes an optional value (only "requester")
+    const value = eq ? eq[2] : flag === "--request-payer" && rest[i + 1] !== "requester" ? undefined : rest[++i];
+    if ((flag === "--exclude" || flag === "--include") && value !== undefined) filters.push({ type: flag === "--exclude" ? "exclude" : "include", pattern: value });
+  }
+  if (rest.includes("--help") || pos[0] !== "s3" || !["sync", "cp", "mv"].includes(pos[1])) return undefined;
+  const [, verb, src, dst] = pos;
+  if (!src || !dst || /^s3:\/\//i.test(src) || !/^s3:\/\//i.test(dst)) return undefined; // a download, or s3 → s3
+  if (verb !== "sync" && !recursive) return undefined; // a single file
+  return { host: "aws-s3", dir: norm(src), source: "command", opts: filters.length ? { s3Filters: filters } : {} };
+}
+
+/** Deploy lines in free-form shell text (a workflow's run: blocks, deploy.sh, a Makefile). Joins "\" continuations. */
+export function deploymentsFromScript(text: string, only?: HostId[]): Deployment[] {
+  const out: Deployment[] = [];
+  for (const raw of text.replace(/\\\r?\n\s*/g, " ").split(/\r?\n/)) {
+    const line = raw.replace(/^\s*(?:-\s+)?(?:run:\s*[|>]?[-+]?\s*)?/, "").replace(/\s#.*$/, "").replace(/^[@-]+(?=[\w.])/, "") // make recipes: @cmd, -cmd
+      .replace(/\$\{\{\s*(.*?)\s*\}\}/g, (_, x: string) => "${{" + x.replace(/\s+/g, "") + "}}"); // keep an Actions expression as one word
+    if (!line || line.startsWith("#")) continue;
+    for (const d of deploymentsFromCommand(line)) if (!only || only.includes(d.host)) out.push(d);
+  }
+  return out;
+}
+
+export const HOST_ORDER: HostId[] = ["cf-pages", "cf-workers", "vercel", "netlify", "firebase", "github-pages", "gh-pages", "surge", "aws-s3"];
