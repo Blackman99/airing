@@ -45,7 +45,7 @@ Exit code `1` means something would leak, `0` means clean, `2` means a usage or 
 
 ## Stop the agent before it deploys
 
-**Claude Code** — a `PreToolUse` hook that denies a leaking `wrangler` / `vercel` / `netlify` / `firebase` / `gh-pages` / `surge` command and hands the agent the fix:
+**Claude Code** — a `PreToolUse` hook that denies a leaking `wrangler` / `vercel` / `netlify` / `firebase` / `gh-pages` / `surge` / `aws s3 sync` command and hands the agent the fix:
 
 ```bash
 npm i -g https://github.com/Blackman99/airing/releases/latest/download/airing.tgz     # once, so the hook starts in ms
@@ -101,6 +101,9 @@ Read-only tools: `scan_deploy`, `probe_url`, `host_rules`.
 | GitHub Pages (Actions) | home | home | **public** | no | don't set `include-hidden-files: true` |
 | gh-pages (npm) | home | home | **public** | no | don't pass `--dotfiles` |
 | Surge (`surge <dir> <domain>`) | home | home | **public** | no | `.surgeignore` — and no `!.env`-style lines in it |
+| AWS S3 (`aws s3 sync <dir> s3://…`) | **public** | **public** | **public** | no | `--exclude` flags — `".env*"` and `"*/.env*"`, never `"./.env"` (it matches nothing) |
+
+`aws s3 sync` (and `aws s3 cp --recursive`) is also read from workflow `run:` steps, `deploy.sh`-style scripts and Makefiles, filters included. "Public" for S3 means served by whatever fronts the bucket — website endpoint or CloudFront.
 
 `airing hosts` prints these rules with links to the upstream source each one is ported from.
 

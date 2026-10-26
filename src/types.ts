@@ -1,4 +1,4 @@
-export type HostId = "cf-pages" | "cf-workers" | "vercel" | "netlify" | "firebase" | "github-pages" | "gh-pages" | "surge";
+export type HostId = "cf-pages" | "cf-workers" | "vercel" | "netlify" | "firebase" | "github-pages" | "gh-pages" | "surge" | "aws-s3";
 
 /** A file in the tree, path is posix and relative to the tree root. */
 export interface Entry {
@@ -71,6 +71,13 @@ export interface HostOpts {
   vercelStatic?: boolean;
   /** Netlify: deploy dir == site base → node_modules skipped */
   netlifyAtRoot?: boolean;
+  /** aws s3 sync / cp --recursive: --exclude / --include filters, in command-line order */
+  s3Filters?: S3Filter[];
+}
+
+export interface S3Filter {
+  type: "exclude" | "include";
+  pattern: string;
 }
 
 export interface FileFate {

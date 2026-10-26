@@ -19,7 +19,7 @@ test("matrix: the $90k project root, host by host", async () => {
   const { root, google } = vibeApp();
   const r = await scan(nodeTree(root));
   assert.equal(r.matrix, true);
-  assert.equal(r.deployments.length, 8);
+  assert.equal(r.deployments.length, 9);
   const pages = byHost(r, "cf-pages");
   const env = find(pages, ".env")!;
   assert.equal(env.severity, "LEAK");
@@ -47,6 +47,10 @@ test("matrix: the $90k project root, host by host", async () => {
   const sg = byHost(r, "surge");
   assert.ok(!find(sg, ".env") && !find(sg, ".dev.vars") && !find(sg, ".git/"));
   assert.equal(find(sg, "backup.sql")?.severity, "LEAK");
+  // aws s3 sync: no default ignores at all — .env, .git, the dump, node_modules all go up
+  const s3 = byHost(r, "aws-s3");
+  for (const p of [".env", ".dev.vars", ".git/", "backup.sql"]) assert.equal(find(s3, p)?.severity, "LEAK", p);
+  assert.equal(s3.savedByHost.length, 0);
   // the bundle: inline Google key is RISK (could be a restricted browser key), map with key is LEAK
   assert.equal(find(pages, "dist/assets/index-3f2a.js")?.severity, "RISK");
   assert.ok(pages.findings.some((f) => f.path === "dist/assets/index-3f2a.js.map" && f.rule === "source-map"));
@@ -139,6 +143,18 @@ test("command parsing: what an agent actually types", () => {
   assert.deepEqual(p("surge teardown x.surge.sh"), []);
   assert.deepEqual(p("surge x.surge.sh status"), []);
   assert.deepEqual(p("surge --help"), []);
+  assert.deepEqual(p("aws s3 sync dist s3://my-site"), ["aws-s3:dist"]);
+  assert.deepEqual(p("aws --profile prod s3 sync ./out s3://my-site --delete --cache-control max-age=60"), ["aws-s3:out"]);
+  assert.deepEqual(p("aws s3 sync . s3://b --exclude=.git/* --region=eu-west-1 --dryrun"), ["aws-s3:."]);
+  assert.deepEqual(p("aws s3 cp build s3://b/ --recursive"), ["aws-s3:build"]);
+  assert.deepEqual(p("aws s3 mv --recursive public s3://b"), ["aws-s3:public"]);
+  assert.deepEqual(p("aws s3 cp index.html s3://b/"), [], "single file, not a site");
+  assert.deepEqual(p("aws s3 sync s3://b ./backup"), [], "download");
+  assert.deepEqual(p("aws s3 sync s3://a s3://b"), [], "bucket to bucket");
+  assert.deepEqual(p("aws s3 ls s3://b"), []);
+  assert.deepEqual(p("aws s3api put-object --bucket b --key k --body f"), []);
+  assert.deepEqual(p("aws cloudfront create-invalidation --distribution-id X --paths /*"), []);
+  assert.deepEqual(p("npm run build && aws s3 sync dist s3://b --delete && aws cloudfront create-invalidation --distribution-id X --paths '/*'"), ["aws-s3:dist"]);
   assert.deepEqual(p("git push && echo done"), []);
   assert.deepEqual(p("CLOUDFLARE_ACCOUNT_ID=x npx wrangler pages deploy out"), ["cf-pages:out"]);
 });
@@ -170,4 +186,52 @@ test("matrix labels keep the file name and the secret count when shortened", asy
   assert.equal(fitLabel(".env (4 secrets)", 34), ".env (4 secrets)");
   assert.equal(fitLabel("a-very-long-file-name-without-any-folder.sql", 20), "…hout-any-folder.sql");
   assert.equal(fitLabel("public/very/deep/folder/structure/with-a-long-name.js.map", 34), "public/…/with-a-long-name.js.map");
+});
+
+test("aws-s3: --exclude/--include in order, last match wins, the fix is exclude flags", async () => {
+  const { s3Excludes } = await import("../src/scan.js");
+  const filters = (...f: [("exclude" | "include"), string][]) => f.map(([type, pattern]) => ({ type, pattern }));
+  const run = async (s3Filters: ReturnType<typeof filters>, extra: Record<string, string> = {}) => {
+    const { root } = vibeApp({ "site/index.html": "<h1>hi</h1>", "site/.env": `OPENAI_API_KEY=${fake.openai()}\n`, "site/.git/config": "[core]\n", "site/sub/.env.local": `STRIPE_SECRET_KEY=${fake.stripe()}\n`, ...extra });
+    return (await scan(nodeTree(root), { deployments: [{ host: "aws-s3", dir: "site", source: "command", opts: { s3Filters } }] })).deployments[0];
+  };
+  // no filters: everything leaks, and the fix names both the top-level and nested copies
+  const none = await run([]);
+  assert.deepEqual(none.findings.filter((f) => f.severity === "LEAK").map((f) => f.path).sort(), [".env", ".git/", "sub/.env.local"]);
+  assert.ok(/aws s3 command/.test(none.remedy!.say));
+  assert.deepEqual(none.remedy!.lines, ['--exclude ".env*"', '--exclude "*/.env*"', '--exclude ".git/*"']);
+  // the common wrong fix: ".*" saves .env and .git at the top — fnmatch "*" crosses "/" — but not sub/.env.local
+  const dot = await run(filters(["exclude", ".*"]));
+  assert.deepEqual(dot.findings.filter((f) => f.severity === "LEAK").map((f) => f.path), ["sub/.env.local"]);
+  assert.ok(dot.savedByHost.some((s) => s.path === ".env" && s.why === '--exclude ".*"'));
+  // a later --include re-publishes it
+  const back = await run(filters(["exclude", ".*"], ["include", ".env"]));
+  assert.equal(find(back, ".env")?.severity, "LEAK");
+  assert.ok(!find(back, ".git/"));
+  // "./" never matches, and the report says why
+  const slash = await run(filters(["exclude", "./.env"], ["exclude", ".git/*"], ["exclude", "*/.env*"]));
+  assert.equal(find(slash, ".env")?.severity, "LEAK");
+  assert.ok(!find(slash, ".git/") && !find(slash, "sub/.env.local"));
+  assert.ok(slash.remedy!.notes!.some((n) => n.includes('--exclude "./.env"') && n.includes('drop it')));
+  assert.equal(slash.remedy!.lines!.length, 2, "only what still leaks: .env* and */.env*");
+  // the excludes we suggest really do keep each file home under aws-cli semantics
+  assert.deepEqual(s3Excludes("git-dir", "a/.git/"), ["a/.git/*"]);
+  const fixed = await run(none.remedy!.lines!.map((l) => ({ type: "exclude" as const, pattern: /"(.*)"/.exec(l)![1] })));
+  assert.deepEqual(fixed.findings.filter((f) => f.severity === "LEAK"), []);
+});
+
+test("aws-s3: read from workflows, deploy scripts and Makefiles (free-form shell)", async () => {
+  const { detectDeployments } = await import("../src/detect.js");
+  const { root } = vibeApp({
+    ".github/workflows/deploy.yml": "on: push\njobs:\n  d:\n    steps:\n      - run: npm run build\n      - run: |\n          aws s3 sync ./dist s3://my-site \\\n            --delete \\\n            --exclude \"*.map\"   # no maps\n      - run: aws s3 sync ${{ env.OUT }} s3://other\n",
+    "scripts/deploy.sh": "#!/bin/sh\nset -e\naws s3 cp public s3://assets --recursive\n",
+    "Makefile": "deploy:\n\t@aws s3 sync build s3://b --exclude '.git/*'\n",
+    "src/notes.md": "aws s3 sync docs s3://ignored-not-a-script\n",
+  });
+  const d = await detectDeployments(nodeTree(root));
+  const s3 = d.deployments.filter((x) => x.host === "aws-s3");
+  assert.deepEqual(s3.map((x) => `${x.dir}@${x.source}`).sort(), ["build@Makefile", "dist@.github/workflows/deploy.yml", "public@scripts/deploy.sh"]);
+  assert.deepEqual(s3.find((x) => x.dir === "dist")!.opts.s3Filters, [{ type: "exclude", pattern: "*.map" }]);
+  assert.deepEqual(s3.find((x) => x.dir === "build")!.opts.s3Filters, [{ type: "exclude", pattern: ".git/*" }]);
+  assert.ok(d.notes.some((n) => n.startsWith(".github/workflows/deploy.yml: aws s3 upload from \"${{") && n.includes("a variable")), "a variable dir is reported, not guessed");
 });

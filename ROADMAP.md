@@ -10,7 +10,8 @@
 ## v0.2
 - Old deployments stay live: list Cloudflare Pages `<hash>.<project>.pages.dev` and Vercel preview URLs with the host APIs and probe them too
 - Surge: shipped in v0.2.0 (`--host surge`, `.surgeignore`, cross-checked against surge-ignore and the surge-stream walker)
-- Render static sites, Azure Static Web Apps, AWS Amplify / `aws s3 sync`
+- `aws s3 sync`: shipped on main, unreleased (`--host aws-s3`, `--exclude`/`--include` with aws-cli's fnmatch semantics, read from commands, workflows, scripts and Makefiles; cross-checked against the real `aws s3 sync --dryrun` and CPython `fnmatch`)
+- Render static sites, Azure Static Web Apps, AWS Amplify
 - `--watch` for agents that deploy in a loop
 
 ## v0.3

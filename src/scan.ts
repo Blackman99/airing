@@ -46,7 +46,23 @@ export function fixFor(host: HostId, path: string, rule: string, dirLabel: strin
       return `remove it from ${dirLabel}, or drop --dotfiles`;
     case "surge":
       return `add "${pat}" to ${dirLabel === "." ? "" : dirLabel + "/"}.surgeignore (and drop any !${pat} line there)`;
+    case "aws-s3":
+      return `append ${s3Excludes(rule, path).map((p) => `--exclude "${p}"`).join(" ")} to the aws s3 command, after any --include (the last matching filter wins)`;
   }
+}
+
+/** --exclude patterns that keep a finding home under aws-cli's fnmatch (where "*" also crosses "/"). */
+export function s3Excludes(rule: string, path: string): string[] {
+  const p = path.replace(/\/$/, "");
+  if (rule === "git-dir") return [p + "/*"];
+  if (rule === "env-file") return p.endsWith(".dev.vars") ? ["*.dev.vars"] : [".env*", "*/.env*"];
+  if (rule === "source-map" || p.endsWith(".map")) return ["*.map"];
+  if (rule === "agent-config") {
+    const s = p.split("/");
+    const i = s.findIndex((x) => x.startsWith("."));
+    return [s.slice(0, i + 1).join("/") + "/*"];
+  }
+  return [p];
 }
 
 async function mapLimit<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -72,6 +88,7 @@ const SERVER_SIDE: Record<string, string> = {
   "github-pages": "a serverless function on another host — GitHub Pages is static only",
   "gh-pages": "a serverless function on another host — GitHub Pages is static only",
   surge: "a serverless function on another host — Surge is static only",
+  "aws-s3": "a Lambda function URL or API Gateway, key in Secrets Manager — an S3 bucket is static only",
 };
 
 const BUILD_DIRS = ["dist", "build", "out", "public", "_site", ".output/public", "www"];
@@ -94,11 +111,13 @@ export function remedyFor(tree: Tree, d: Deployment, findings: Finding[]): Remed
     : f.rule === "git-dir" ? ".git" : f.rule === "env-file" ? (f.path.endsWith(".dev.vars") ? ".dev.vars" : ".env*") : f.rule === "agent-config" ? agentDir(f.path) : f.path.replace(/\/$/, "");
   const lines = [...new Set(ignorable.map(line))];
   if (lines.includes("*.map")) notes.push("source maps: build with sourcemap: 'hidden' (Vite: build.sourcemap) so .map files never reach the output at all.");
+  const dotSlash = d.host === "aws-s3" ? (d.opts.s3Filters ?? []).filter((f) => /^\.\.?\//.test(f.pattern)) : [];
+  if (dotSlash.length) notes.unshift(`${dotSlash.map((f) => `--${f.type} "${f.pattern}"`).join(", ")} match${dotSlash.length === 1 ? "es" : ""} nothing: aws-cli joins the pattern onto the source dir as written, so the "./" never matches — drop it.`);
   const atRoot = d.dir === "." && tree.files.some((f) => f.path === "package.json");
   const build = atRoot ? BUILD_DIRS.find((b) => tree.files.some((f) => f.path.startsWith(b + "/") && /\.html?$/.test(f.path))) : undefined;
   const r = (say: string, extra: Partial<Remedy> = {}): Remedy => ({ say, lines: lines.length ? lines : undefined, notes: notes.length ? notes : undefined, ...extra });
-  if (build && ["cf-pages", "netlify", "gh-pages", "firebase", "github-pages", "surge"].includes(d.host)) {
-    const cmd = { "cf-pages": `wrangler pages deploy ${build}`, netlify: `netlify deploy --dir ${build}`, "gh-pages": `gh-pages -d ${build}`, firebase: `set "public": "${build}" in firebase.json`, "github-pages": `path: ${build}`, surge: `surge ${build} <domain>` }[d.host as "cf-pages"];
+  if (build && ["cf-pages", "netlify", "gh-pages", "firebase", "github-pages", "surge", "aws-s3"].includes(d.host)) {
+    const cmd = { "cf-pages": `wrangler pages deploy ${build}`, netlify: `netlify deploy --dir ${build}`, "gh-pages": `gh-pages -d ${build}`, firebase: `set "public": "${build}" in firebase.json`, "github-pages": `path: ${build}`, surge: `surge ${build} <domain>`, "aws-s3": `aws s3 sync ${build} s3://<bucket>` }[d.host as "cf-pages"];
     return r(`you are deploying the project root — deploy the build output instead: ${cmd}`, { lines: undefined });
   }
   if (!lines.length) return r("");
@@ -119,6 +138,10 @@ export function remedyFor(tree: Tree, d: Deployment, findings: Finding[]): Remed
       return r(d.opts.ghPagesDotfiles ? "drop --dotfiles, or move these out" : `move these out of ${dir || "the folder you pass to gh-pages -d"}`);
     case "surge":
       return r(`add to ${dir}.surgeignore (and delete any "!" line there that re-includes them)`, { file: `${dir}.surgeignore` });
+    case "aws-s3": {
+      const ex = [...new Set(ignorable.flatMap((f) => s3Excludes(f.rule, f.path)))].map((p) => `--exclude "${p}"`);
+      return r("append to the aws s3 command, after any --include (the last matching filter wins)", { lines: ex, notes: notes.length ? notes : undefined });
+    }
   }
 }
 
@@ -187,7 +210,7 @@ export async function scanDeployment(tree: Tree, d: Deployment): Promise<Deploym
       path: key + "/",
       size: g.size,
       title: "git repository",
-      detail: `${g.files} files: full source and history — tools like git-dumper rebuild the repo from /${key}/${cred ? "; remote URL embeds a token" : ""}`,
+      detail: `${g.files} file${g.files === 1 ? "" : "s"}: full source and history — tools like git-dumper rebuild the repo from /${key}/${cred ? "; remote URL embeds a token" : ""}`,
       secrets: cred ? [{ name: "remote URL credentials", provider: /github/.test(cfg) ? "GitHub" : "git host", fingerprint: fingerprint(cred[2]), rotate: /github/.test(cfg) ? "https://github.com/settings/tokens" : undefined, shape: `${cred[2].slice(0, 4)}…(${cred[2].length} chars)` }] : [],
       fix: "",
     });

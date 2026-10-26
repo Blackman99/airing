@@ -9,7 +9,7 @@
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="airing">
 <meta property="og:title" content="airing docs — what each host hangs out in public">
-<meta property="og:description" content="CLI, probe, guard, Claude Code hook, MCP and GitHub Action — plus the real upload rules of Cloudflare, Vercel, Netlify, Firebase, GitHub Pages and Surge.">
+<meta property="og:description" content="CLI, probe, guard, Claude Code hook, MCP and GitHub Action — plus the real upload rules of Cloudflare, Vercel, Netlify, Firebase, GitHub Pages, Surge and AWS S3.">
 <meta property="og:url" content="https://blackman99.github.io/airing/docs/">
 <meta property="og:image" content="https://blackman99.github.io/airing/og.png">
 <meta property="og:image:width" content="1200">
@@ -62,7 +62,7 @@ airing --matrix              # every host, even if config names one</pre>
 airing probe https://blackman99.github.io/airing/leaky-demo/   # our deliberately leaky page</pre>
   <p class="aside">Only probe sites you own. If a key turns up, rotate it before anything else. Deleting the file does not undo a download, and on Cloudflare Pages your old deployments (<code>&lt;hash&gt;.&lt;project&gt;.pages.dev</code>) keep serving it.</p>
   <h3>Stop the deploy: <code>airing guard -- &lt;cmd&gt;</code></h3>
-  <p>Put <code>airing guard --</code> in front of a deploy command. airing works out what that exact command would upload (wrangler, vercel, netlify, firebase, gh-pages or surge, including through npx, pnpm dlx, bunx and env prefixes) and runs the command only if nothing would leak. If something would leak, it exits 1 and the deploy does not run.</p>
+  <p>Put <code>airing guard --</code> in front of a deploy command. airing works out what that exact command would upload (wrangler, vercel, netlify, firebase, gh-pages, surge or <code>aws s3 sync</code>, including through npx, pnpm dlx, bunx and env prefixes) and runs the command only if nothing would leak. If something would leak, it exits 1 and the deploy does not run.</p>
   <pre class="code" tabindex="0">airing guard -- wrangler pages deploy dist
 airing guard -- npx vercel --prod</pre>
   <h3>Claude Code hook: <code>airing hook</code></h3>
@@ -105,15 +105,16 @@ airing guard -- npx vercel --prod</pre>
       <tr><td><code>netlify.toml</code></td><td><code>build.publish</code> (and <code>build.base</code>)</td></tr>
       <tr><td><code>firebase.json</code></td><td><code>hosting.public</code> and <code>hosting.ignore</code></td></tr>
       <tr><td><code>vercel.json</code>, <code>.vercel/project.json</code></td><td>a Vercel project. With no build script it is served as-is, otherwise files go to the build machine.</td></tr>
-      <tr><td><code>package.json</code> scripts</td><td>any <code>wrangler</code> / <code>vercel</code> / <code>netlify</code> / <code>firebase</code> / <code>gh-pages</code> / <code>surge</code> deploy command</td></tr>
-      <tr><td><code>.github/workflows/*.yml</code></td><td><code>actions/upload-pages-artifact</code> <code>path</code> and <code>include-hidden-files</code>, plus <code>cloudflare/wrangler-action</code> commands</td></tr>
+      <tr><td><code>package.json</code> scripts</td><td>any <code>wrangler</code> / <code>vercel</code> / <code>netlify</code> / <code>firebase</code> / <code>gh-pages</code> / <code>surge</code> / <code>aws s3 sync</code> deploy command</td></tr>
+      <tr><td><code>.github/workflows/*.yml</code></td><td><code>actions/upload-pages-artifact</code> <code>path</code> and <code>include-hidden-files</code>, plus <code>cloudflare/wrangler-action</code> commands and <code>aws s3 sync</code> in <code>run:</code> steps</td></tr>
+      <tr><td><code>*.sh</code>, <code>Makefile</code> (root, <code>scripts/</code>, <code>bin/</code>, <code>deploy/</code>)</td><td><code>aws s3 sync &lt;dir&gt; s3://…</code> and <code>aws s3 cp &lt;dir&gt; s3://… --recursive</code>, with their <code>--exclude</code> / <code>--include</code> filters. A directory that is a variable is reported, not guessed.</td></tr>
       <tr><td><code>.assetsignore</code>, <code>.vercelignore</code></td><td>applied the way the host applies them (the <code>ignore</code> package, i.e. gitignore syntax)</td></tr>
     </tbody>
   </table>
   <h3>Flags</h3>
   <table class="plain">
     <tbody>
-      <tr><td><code>--host &lt;id&gt;</code></td><td><code>cf-pages</code> · <code>cf-workers</code> · <code>vercel</code> · <code>netlify</code> · <code>firebase</code> · <code>github-pages</code> · <code>gh-pages</code> · <code>surge</code></td></tr>
+      <tr><td><code>--host &lt;id&gt;</code></td><td><code>cf-pages</code> · <code>cf-workers</code> · <code>vercel</code> · <code>netlify</code> · <code>firebase</code> · <code>github-pages</code> · <code>gh-pages</code> · <code>surge</code> · <code>aws-s3</code></td></tr>
       <tr><td><code>--dir &lt;path&gt;</code></td><td>the directory you deploy, relative to <code>[dir]</code></td></tr>
       <tr><td><code>--fail-on</code></td><td><code>leak</code> (default), <code>risk</code> or <code>never</code></td></tr>
       <tr><td><code>--json</code> / <code>--markdown</code></td><td>machine output and PR-comment output. Neither ever contains a value.</td></tr>
@@ -128,7 +129,7 @@ airing guard -- npx vercel --prod</pre>
   <p class="no">iv</p>
   <h2>Reference</h2>
   <h3>What each host uploads</h3>
-  <p>Every rule is ported from the host CLI's own source, which each host name links to. CI cross-checks the ports against <code>@vercel/client</code>'s <code>buildFileTree</code>, <code>glob@10</code> (firebase-tools), <code>tinyglobby</code> (gh-pages), <code>surge-ignore</code> with the <code>ignore</code> library (Surge), real GNU <code>tar</code> (upload-pages-artifact) and verbatim copies of the wrangler, netlify and surge-stream walkers.</p>
+  <p>Every rule is ported from the host CLI's own source, which each host name links to. CI cross-checks the ports against <code>@vercel/client</code>'s <code>buildFileTree</code>, <code>glob@10</code> (firebase-tools), <code>tinyglobby</code> (gh-pages), <code>surge-ignore</code> with the <code>ignore</code> library (Surge), real GNU <code>tar</code> (upload-pages-artifact), the real <code>aws s3 sync --dryrun</code> against a stub bucket plus CPython's <code>fnmatch</code> (AWS S3), and verbatim copies of the wrangler, netlify and surge-stream walkers.</p>
   <table class="plain hosts-ref">
     <thead><tr><th>host</th><th>skips</th><th>so this goes public</th></tr></thead>
     <tbody>
@@ -140,6 +141,7 @@ airing guard -- npx vercel --prod</pre>
       <tr><th><a href="https://github.com/actions/upload-pages-artifact/blob/main/action.yml">GitHub Pages</a></th><td><code>.git</code>, <code>.github</code>, and every dotfile unless <code>include-hidden-files: true</code></td><td>non-dot files such as <code>backup.sql</code> and <code>*.map</code>, plus dotfiles when hidden files are included</td></tr>
       <tr><th><a href="https://github.com/tschaub/gh-pages/blob/main/lib/index.js">gh-pages</a></th><td>dotfiles unless <code>--dotfiles</code></td><td><code>node_modules/</code> and every non-dot file</td></tr>
       <tr><th><a href="https://github.com/sintaxi/surge-sdk/blob/master/stream/lib/stream.js">Surge</a></th><td><code>.git</code>, every dotfile and dot-directory (<code>.*</code>), <code>*.*~</code>, <code>node_modules</code>, <code>bower_components</code> + <code>.surgeignore</code></td><td>non-dot files such as <code>backup.sql</code>, <code>id_rsa</code> and <code>*.map</code>; dotfiles too if <code>.surgeignore</code> un-ignores them with <code>!</code></td></tr>
+      <tr><th><a href="https://github.com/aws/aws-cli/blob/develop/awscli/customizations/s3/filters.py">AWS S3</a></th><td>nothing by default. Each <code>--exclude</code> / <code>--include</code> is joined onto the source dir and matched with <code>fnmatch</code>, in order, and the last match wins. <code>*</code> crosses <code>/</code>.</td><td>everything: <code>.env</code>, <code>.git/</code>, <code>node_modules/</code>. <code>--exclude ".*"</code> misses <code>sub/.env</code>, and <code>--exclude "./.env"</code> matches nothing.</td></tr>
     </tbody>
   </table>
   <h3>Findings</h3>
@@ -158,7 +160,7 @@ airing guard -- npx vercel --prod</pre>
   <p class="no">v</p>
   <h2>FAQ</h2>
   <h3>My <code>.gitignore</code> has <code>.env</code>. Am I safe?</h3>
-  <p>Not when you deploy with a CLI. <code>wrangler</code>, <code>vercel</code>, <code>netlify</code>, <code>firebase</code>, <code>gh-pages</code> and <code>surge</code> all upload from your disk and none of them read <code>.gitignore</code>. Git-connected builds are different: there the host clones your repo, so ignored files never reach it.</p>
+  <p>Not when you deploy with a CLI. <code>wrangler</code>, <code>vercel</code>, <code>netlify</code>, <code>firebase</code>, <code>gh-pages</code>, <code>surge</code> and <code>aws s3 sync</code> all upload from your disk and none of them read <code>.gitignore</code>. Git-connected builds are different: there the host clones your repo, so ignored files never reach it.</p>
   <h3>Does airing upload or print my keys?</h3>
   <p>No. It reads files locally and reports the variable name, the provider, a shape such as <code>AIza…(39 chars)</code> and the first 8 hex characters of the value's SHA-256. That is enough to tell which key it is, and not enough to use it. The tests check that values never show up in any output format.</p>
   <h3>Why does Vercel show "uploaded" instead of "public"?</h3>
@@ -167,6 +169,8 @@ airing guard -- npx vercel --prod</pre>
   <p>No. It fetches a random path first to learn what your soft-404 looks like, and every hit has to match the file's real format: <code>KEY=VALUE</code> lines for <code>.env</code>, <code>[core]</code> for <code>.git/config</code>, SQL for a dump, and so on.</p>
   <h3>I found a leak. What now?</h3>
   <p>Rotate the key first, using the link in the finding. Then fix the deploy as airing's "keep it home" line says, redeploy, and run <code>airing probe</code> on the live site. On Cloudflare Pages, also delete the old deployments, because each one keeps its own URL.</p>
+  <h3>My S3 bucket is private, behind CloudFront. Does this apply?</h3>
+  <p>Yes. airing treats anything synced to the bucket as public because whatever fronts the bucket serves any key in it: the website endpoint does, and so does CloudFront with origin access control, unless you add path rules. A private bucket that nothing serves is the one case where an S3 finding is only a copy of your secrets in another place. Run <code>airing probe</code> on the live URL to see what is actually reachable.</p>
   <h3>Something's wrong for my host.</h3>
   <p><a href="https://github.com/Blackman99/airing/issues/new?template=bug_report.md">Open an issue</a> with the deploy command and the output. Output is safe to paste because it contains no values.</p>
 </section>
